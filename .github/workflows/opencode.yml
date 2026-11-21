@@ -159,6 +159,7 @@ jobs:
     timeout-minutes: 2
     permissions:
       issues: write
+      pull-requests: write
     steps:
       - name: Post OpenCode response
         env:
@@ -168,5 +169,10 @@ jobs:
           REPLY: ${{ needs.analyze.outputs.reply }}
         run: |
           test -n "$REPLY"
+          endpoint="repos/$GH_REPO/issues/$ISSUE_NUMBER/comments"
+          if test "$GITHUB_EVENT_NAME" = pull_request_review_comment; then
+            comment_id=$(jq -r '.comment.in_reply_to_id // .comment.id' "$GITHUB_EVENT_PATH")
+            endpoint="repos/$GH_REPO/pulls/$ISSUE_NUMBER/comments/$comment_id/replies"
+          fi
           printf '%s' "$REPLY" | base64 --decode | jq -Rs '{body: .}' |
-            gh api "repos/$GH_REPO/issues/$ISSUE_NUMBER/comments" --input - --jq .html_url
+            gh api "$endpoint" --input - --jq .html_url
