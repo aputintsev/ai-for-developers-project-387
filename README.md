@@ -127,15 +127,13 @@ The `.github/workflows/opencode.yml` workflow answers maintainer requests in the
 
 It runs on `issue_comment` and `pull_request_review_comment`, both with `types: [created]`; editing or deleting a comment does not start a run. A command must be the first text in the comment and begin with `/oc <request>` or `/opencode <request>`. These two prefixes are the complete command set because the analyze job's `if` and the concurrency expression both check `startsWith(..., '/oc ')` or `startsWith(..., '/opencode ')`: the filter in the workflow, not the agent, decides which commands are accepted.
 
-Only comments from human users are considered: bots are ignored, the author must be `OWNER` or `COLLABORATOR`, and the job re-checks `admin`, `maintain`, or `write` repository permission through `gh api`. For pull requests, the workflow proceeds only when the head branch belongs to this repository. The owner-only `/oc apply patch <comment ID>` command is handled by a separate apply job instead of the analyze job.
+Only comments from human users are considered: bots are ignored, the author must be `OWNER` or `COLLABORATOR`, and the job re-checks `admin`, `maintain`, or `write` repository permission through `gh api`. For pull requests, the workflow proceeds only when the head branch belongs to this repository.
 
 ### What the agent can do
 
 The default `plan` run can read with `read`, `glob`, and `grep`, and may load the `to-spec`, `to-tickets`, and `implement-spec` skills from `.agents/skills/`. It cannot edit files or run commands. Its answer is posted in the original thread: an issue or PR conversation comment becomes a new issue comment, and an inline review comment becomes a reply in that review thread.
 
 When the repository owner posts a comment starting with `/oc implement this issue` on an issue (not a pull request), the workflow switches to the `build` agent and allows file edits, except `.git/**`, `.github/workflows/**`, and `opencode.json`. The edited tree is exported as a patch limited to 90 KB. A separate `publish-implementation` job then commits it as `github-actions[bot]` to a fresh `opencode/issue-<number>-<run>-<attempt>` branch, opens a draft PR against the default branch, and comments the commit, PR, and Actions links on the issue. The agent never commits, pushes, or opens the PR itself.
-
-The only other write path is the test surface described under [Test a PR edit](#test-a-pr-edit): `/oc draft patch <request>` proposes a one-line change to `docs/opencode-patch-test.md`, and the owner applies an approved proposal with `/oc apply patch <comment ID>`.
 
 ### Model and authorization
 
@@ -146,25 +144,14 @@ Unlike a standard GitHub App installation, the workflow does not create a separa
 - `analyze`: read `contents`, `issues`, and `pull-requests`.
 - `reply`: write `issues` and `pull-requests`.
 - `publish-implementation`: write `contents`, `issues`, and `pull-requests`.
-- `apply-test-patch`: write `contents`, read `issues` and `pull-requests`.
 
 Checkouts use `persist-credentials: false`, so the token is not stored in the Git configuration. The publish job calls `gh auth setup-git` only when it is ready to push.
 
-Runs for the same issue or pull request share a `thread-<number>` concurrency group with `cancel-in-progress: false`, so a new command queues behind the current one instead of interrupting it. Analysis is limited to 8 minutes, publishing the implementation to 5 minutes, and posting the reply or applying a patch to 2 minutes.
+Runs for the same issue or pull request share a `thread-<number>` concurrency group with `cancel-in-progress: false`, so a new command queues behind the current one instead of interrupting it. Analysis is limited to 8 minutes, publishing the implementation to 5 minutes, and posting the reply to 2 minutes.
 
 ### Session sharing and logs
 
-Session sharing is intentionally off: OpenCode V2 no longer shares sessions, the workflow invokes the CLI with `--standalone run`, and it does not pass a share option, so no public OpenCode session link is created or posted. The durable result is the reply comment in the original GitHub thread, or the implementation branch and draft PR. Run status and logs are under [OpenCode runs](https://github.com/aputintsev/ai-for-developers-project-387/actions/workflows/opencode.yml): open the run and its `analyze`, `reply`, `publish-implementation`, or `apply-test-patch` job to read the output. The verified answer and a complete run are [issue #2, comment 7061444570](https://github.com/aputintsev/ai-for-developers-project-387/issues/2#issuecomment-7061444570) and [actions/runs/44895757314](https://github.com/aputintsev/ai-for-developers-project-387/actions/runs/44895757314).
-
-### Test a PR edit
-
-The draft PR from `test/opencode-patch` into `main` is the test surface.
-Use `/oc draft patch <request>` in its conversation to propose a one-line
-change to `docs/opencode-patch-test.md`. Review the diff and use the ID at the end
-of the proposal comment URL. The repository owner can then post
-`/oc apply patch <comment ID>` in the same PR. The apply job commits only to
-the test branch and requires the head SHA shown in the proposal to still be
-current. Its Actions log links to the commit.
+Session sharing is intentionally off: OpenCode V2 no longer shares sessions, the workflow invokes the CLI with `--standalone run`, and it does not pass a share option, so no public OpenCode session link is created or posted. The durable result is the reply comment in the original GitHub thread, or the implementation branch and draft PR. Run status and logs are under [OpenCode runs](https://github.com/aputintsev/ai-for-developers-project-387/actions/workflows/opencode.yml): open the run and its `analyze`, `reply`, or `publish-implementation` job to read the output. The verified answer and a complete run are [issue #2, comment 7061444570](https://github.com/aputintsev/ai-for-developers-project-387/issues/2#issuecomment-7061444570) and [actions/runs/44895757314](https://github.com/aputintsev/ai-for-developers-project-387/actions/runs/44895757314).
 
 ## Development and quality checks
 

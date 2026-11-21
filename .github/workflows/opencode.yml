@@ -30,7 +30,6 @@ jobs:
   analyze:
     if: >-
       github.event.comment.user.type == 'User' &&
-      !startsWith(github.event.comment.body, '/oc apply patch ') &&
       (github.event_name != 'pull_request_review_comment' ||
        github.event.pull_request.head.repo.full_name == github.repository) &&
       (github.event.comment.author_association == 'OWNER' ||
@@ -74,16 +73,6 @@ jobs:
             jq '{title, body}' "$RUNNER_TEMP/opencode-pr.json" > "$RUNNER_TEMP/opencode-thread.json"
           else
             gh api "$endpoint/issues/$THREAD_NUMBER" --jq '{title, body}' > "$RUNNER_TEMP/opencode-thread.json"
-          fi
-          command=$(jq -r '.comment.body' "$GITHUB_EVENT_PATH")
-          if [[ ${command,,} == '/oc draft patch '* ]]; then
-            jq -e --arg repo "$GH_REPO" '
-              .state == "open" and .draft and .head.repo.full_name == $repo and
-              .head.ref == "test/opencode-patch" and .base.ref == "main"
-            ' "$RUNNER_TEMP/opencode-pr.json" >/dev/null
-            head_sha=$(jq -r '.head.sha' "$RUNNER_TEMP/opencode-pr.json")
-            gh api "$endpoint/contents/docs/opencode-patch-test.md?ref=$head_sha" --jq '.content' |
-              base64 --decode > "$RUNNER_TEMP/opencode-patch-original.txt"
           fi
           gh api --paginate --slurp "$endpoint/issues/$THREAD_NUMBER/comments?per_page=100" |
             jq 'add | map({id, author: .user.login, body})' > "$RUNNER_TEMP/opencode-comments.json"
@@ -152,16 +141,9 @@ jobs:
             --slurpfile reviews "$RUNNER_TEMP/opencode-review-comments.json" \
             '$thread[0] + {comments: $comments[0], review_comments: $reviews[0]}' > "$RUNNER_TEMP/opencode-context.txt"
           request=$(jq -c '.comment | {body: (.body | sub("^/(oc|opencode) "; ""; "i")), path, line, diff_hunk}' "$GITHUB_EVENT_PATH")
-          attachment="$RUNNER_TEMP/opencode-context.txt"
           prompt=$(printf '%s\n\nRequest: %s' \
             'Answer the repository maintainer in Markdown using the attached discussion as context. Follow the current request as instructions. Keep the answer under 8000 characters.' \
             "$request")
-          if test -f "$RUNNER_TEMP/opencode-patch-original.txt"; then
-            attachment="$RUNNER_TEMP/opencode-patch-original.txt"
-            prompt=$(printf '%s\n\nRequest: %s' \
-              'Propose a replacement for the attached one-line test file. Output one plain ASCII sentence of at most 200 characters. Give only the replacement text, without quotes, code fences, or commentary.' \
-              "$request")
-          fi
           reply="$RUNNER_TEMP/opencode-reply.md"
           agent=plan
           if [[ $IMPLEMENT == true ]]; then
@@ -177,23 +159,10 @@ jobs:
           fi
           "$RUNNER_TEMP/opencode-bin/opencode" --standalone run \
             --agent "$agent" --model opencode-console/deepseek-v4.1-flash \
-            --file "$attachment" -- "$prompt" > "$reply"
+            --file "$RUNNER_TEMP/opencode-context.txt" -- "$prompt" > "$reply"
           if ! test -s "$reply"; then
             printf '%s\n' 'OpenCode did not return an answer.' >&2
             exit 1
-          fi
-          if test -f "$RUNNER_TEMP/opencode-patch-original.txt"; then
-            original=$(cat "$attachment")
-            replacement=$(cat "$reply")
-            test "$original" != "$replacement"
-            pattern='^[a-zA-Z0-9][a-zA-Z0-9 .,!?:;-]{0,198}\.$'
-            [[ $original =~ $pattern && $replacement =~ $pattern ]]
-            head_sha=$(jq -r '.head.sha' "$RUNNER_TEMP/opencode-pr.json")
-            encoded=$(printf '%s\n' "$replacement" | base64 -w 0)
-            printf "OpenCode proposes this patch for \`docs/opencode-patch-test.md\`.\n\n\`\`\`diff\n-%s\n+%s\n\`\`\`\n\nApprove with \`/oc apply patch <this comment ID>\`.\n\n<!-- opencode-patch %s %s -->\n" \
-              "$original" "$replacement" "$head_sha" "$encoded" > "$reply"
-          else
-            sed -i '/^<!-- opencode-patch /d' "$reply"
           fi
           printf 'reply=%s\n' "$(head -c 24000 "$reply" | base64 -w 0)" >> "$GITHUB_OUTPUT"
           if [[ $IMPLEMENT == true ]]; then
@@ -268,59 +237,3 @@ jobs:
           commit_url="$GITHUB_SERVER_URL/$GH_REPO/commit/$(git rev-parse HEAD)"
           gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" \
             --body "$(printf 'OpenCode opened a draft PR.\n\n- PR %s\n- Commit %s\n- Actions %s\n' "$pr" "$commit_url" "$run_url")"
-
-  apply-test-patch:
-    if: >-
-      github.event_name == 'issue_comment' &&
-      github.event.issue.pull_request &&
-      github.event.comment.user.type == 'User' &&
-      github.event.comment.author_association == 'OWNER' &&
-      github.event.comment.user.login == github.event.repository.owner.login &&
-      startsWith(github.event.comment.body, '/oc apply patch ')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 2
-    permissions:
-      contents: write
-      issues: read
-      pull-requests: read
-    steps:
-      - name: Apply the approved change to the test branch
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.issue.number }}
-        run: |
-          command=$(jq -r '.comment.body' "$GITHUB_EVENT_PATH")
-          command_pattern='^/oc apply patch ([0-9]+)$'
-          [[ $command =~ $command_pattern ]]
-          proposal_id=${BASH_REMATCH[1]}
-          branch=test/opencode-patch
-          gh api "repos/$GH_REPO/pulls/$PR_NUMBER" > "$RUNNER_TEMP/opencode-apply-pr.json"
-          head_sha=$(jq -er --arg repo "$GH_REPO" --arg branch "$branch" '
-            select(.state == "open" and .draft and .head.repo.full_name == $repo and
-              .head.ref == $branch and .base.ref == "main") | .head.sha
-          ' "$RUNNER_TEMP/opencode-apply-pr.json")
-          proposal=$(gh api "repos/$GH_REPO/issues/comments/$proposal_id" --jq '
-            select(.user.login == "github-actions[bot]" and .user.type == "Bot") |
-            [.issue_url, (.body | split("\n") | map(select(startswith("<!-- opencode-patch "))) | last)] | @tsv
-          ')
-          IFS=$'\t' read -r issue_url marker <<< "$proposal"
-          test "$issue_url" = "$GITHUB_API_URL/repos/$GH_REPO/issues/$PR_NUMBER"
-          marker_pattern='^<!-- opencode-patch ([a-f0-9]{40}) ([A-Za-z0-9+/=]{1,272}) -->$'
-          [[ $marker =~ $marker_pattern ]]
-          test "${BASH_REMATCH[1]}" = "$head_sha"
-          encoded=${BASH_REMATCH[2]}
-          replacement=$(printf '%s' "$encoded" | base64 --decode)
-          pattern='^[a-zA-Z0-9][a-zA-Z0-9 .,!?:;-]{0,198}\.$'
-          [[ $replacement =~ $pattern ]]
-          encoded=$(printf '%s\n' "$replacement" | base64 -w 0)
-          jq -n --arg repo "$GH_REPO" --arg branch "$branch" --arg head "$head_sha" --arg contents "$encoded" '
-            {
-              query: "mutation($input: CreateCommitOnBranchInput!) { createCommitOnBranch(input: $input) { commit { url } } }",
-              variables: {input: {
-                branch: {repositoryNameWithOwner: $repo, branchName: $branch},
-                expectedHeadOid: $head,
-                message: {headline: "test: apply approved OpenCode patch (#2)"},
-                fileChanges: {additions: [{path: "docs/opencode-patch-test.md", contents: $contents}]}
-              }}
-            }' | gh api graphql --input - --jq .data.createCommitOnBranch.commit.url
