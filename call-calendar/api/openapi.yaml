@@ -1,0 +1,338 @@
+openapi: 3.0.0
+info:
+  title: Календарь звонков
+  version: 0.0.0
+tags: []
+paths:
+  /api/bookings:
+    post:
+      operationId: createBooking
+      parameters:
+        - name: calendarGuest
+          in: cookie
+          required: false
+          schema:
+            type: string
+          explode: false
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          headers:
+            Set-Cookie:
+              required: false
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Booking'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  fieldErrors:
+                    type: object
+                    properties:
+                      meetingTypeId:
+                        type: string
+                      start:
+                        type: string
+                      guestName:
+                        type: string
+                      guestEmail:
+                        type: string
+                required:
+                  - message
+                  - fieldErrors
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                required:
+                  - message
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateBookingInput'
+  /api/guest/bookings:
+    get:
+      operationId: listGuestBookings
+      parameters:
+        - name: calendarGuest
+          in: cookie
+          required: false
+          schema:
+            type: string
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GuestBooking'
+  /api/meeting-types:
+    get:
+      operationId: listMeetingTypes
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MeetingType'
+    post:
+      operationId: createMeetingType
+      parameters: []
+      responses:
+        '201':
+          description: The request has succeeded and a new resource has been created as a result.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeetingType'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  fieldErrors:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                      description:
+                        type: string
+                      durationMinutes:
+                        type: string
+                required:
+                  - message
+                  - fieldErrors
+        '409':
+          description: The request conflicts with the current state of the server.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                  fieldErrors:
+                    type: object
+                    properties:
+                      name:
+                        type: string
+                    required:
+                      - name
+                required:
+                  - message
+                  - fieldErrors
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMeetingTypeInput'
+  /api/meeting-types/{meetingTypeId}/slots:
+    get:
+      operationId: listSlots
+      parameters:
+        - name: meetingTypeId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: date
+          in: query
+          required: true
+          schema:
+            type: string
+            format: date
+          explode: false
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Availability'
+        '400':
+          description: The server could not understand the request due to invalid syntax.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                required:
+                  - message
+        '404':
+          description: The server cannot find the requested resource.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                required:
+                  - message
+  /api/owner/bookings:
+    get:
+      operationId: listOwnerBookings
+      parameters: []
+      responses:
+        '200':
+          description: The request has succeeded.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Booking'
+components:
+  schemas:
+    Availability:
+      type: object
+      required:
+        - timeZone
+        - slots
+      properties:
+        timeZone:
+          type: string
+          enum:
+            - Europe/Moscow
+        slots:
+          type: array
+          items:
+            $ref: '#/components/schemas/Slot'
+    Booking:
+      type: object
+      required:
+        - id
+        - meetingType
+        - guestName
+        - guestEmail
+      properties:
+        id:
+          type: string
+        meetingType:
+          $ref: '#/components/schemas/MeetingType'
+        guestName:
+          type: string
+        guestEmail:
+          type: string
+      allOf:
+        - $ref: '#/components/schemas/Slot'
+    CreateBookingInput:
+      type: object
+      required:
+        - meetingTypeId
+        - start
+        - guestName
+        - guestEmail
+      properties:
+        meetingTypeId:
+          type: string
+        start:
+          type: string
+          format: date-time
+        guestName:
+          type: string
+          minLength: 1
+        guestEmail:
+          type: string
+          format: email
+    CreateMeetingTypeInput:
+      type: object
+      required:
+        - name
+        - description
+        - durationMinutes
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+          minLength: 1
+        durationMinutes:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 480
+      description: The template for omitting properties.
+    GuestBooking:
+      type: object
+      required:
+        - id
+        - meetingType
+        - start
+        - end
+      properties:
+        id:
+          type: string
+        meetingType:
+          $ref: '#/components/schemas/MeetingType'
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time
+      description: The template for omitting properties.
+    MeetingType:
+      type: object
+      required:
+        - id
+        - name
+        - description
+        - durationMinutes
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+          minLength: 1
+        durationMinutes:
+          type: integer
+          format: int32
+          minimum: 1
+          maximum: 480
+    Slot:
+      type: object
+      required:
+        - start
+        - end
+      properties:
+        start:
+          type: string
+          format: date-time
+        end:
+          type: string
+          format: date-time

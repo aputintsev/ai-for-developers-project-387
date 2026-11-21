@@ -1,0 +1,78 @@
+min_version = "2026.11.8"
+
+[settings]
+experimental = true
+# Allow slow connections and temporary stalls when installing tools.
+http_timeout = "5m"
+http_download_timeout = "1h"
+fetch_remote_versions_timeout = "2m"
+
+[tools]
+node = "24.22.3"
+python = "3.14.10"
+hk = "2.12.0"
+pkl = "0.33.0"
+pitchfork = "2.34.0"
+shellcheck = "0.11.0"
+"github:betterleaks/betterleaks" = "1.10.1"
+"github:jdx/jactionlint" = "2.6.0"
+"github:google/osv-scanner" = "2.7.1"
+"pipx:check-jsonschema" = "0.39.0"
+
+[tasks.setup]
+run = ["npm --prefix call-calendar ci", "mise run install:browser", "hk install"]
+
+[tasks.check]
+run = ["mise run generate:api", "hk check --all", "mise run build", "mise run smoke", "mise run vulnerabilities"]
+
+[tasks.lint]
+run = "npm --prefix call-calendar run lint -- --max-warnings 0"
+
+[tasks.build]
+run = "npm --prefix call-calendar run build"
+
+[tasks.smoke]
+run = "npm --prefix call-calendar run test:smoke"
+
+[tasks.secrets]
+run = "betterleaks git --redact"
+
+[tasks.workflows]
+run = "jactionlint --strict-exit --shellcheck=shellcheck"
+
+[tasks.config]
+run = "check-jsonschema --schemafile schemas/renovate.schema.json renovate.json"
+
+[tasks.vulnerabilities]
+run = "osv-scanner scan source --lockfile call-calendar/package-lock.json"
+
+[tasks.fix]
+run = "npm --prefix call-calendar run lint:fix"
+
+[tasks.dev]
+run = "npm --prefix call-calendar run dev"
+
+[tasks."dev:start"]
+run = "mise daemons start web"
+
+[tasks."dev:stop"]
+run = "mise daemons stop web"
+
+[tasks."dev:logs"]
+run = "mise daemons logs web"
+
+[daemons.web]
+run = "exec npm --prefix call-calendar run dev -- --host 127.0.0.1 --port 5173 --strictPort"
+ready_port = 5173
+
+[tasks."generate:api"]
+run = ["mise run generate:openapi", "mise run generate:sdk"]
+
+[tasks."generate:openapi"]
+run = "npm --prefix call-calendar run generate:openapi"
+
+[tasks."generate:sdk"]
+run = "npm --prefix call-calendar run generate:sdk"
+
+[tasks."install:browser"]
+run = "npm --prefix call-calendar run install:browser"

@@ -1,0 +1,32 @@
+amends "package://github.com/jdx/hk/releases/download/v2.12.0/hk@2.12.0#/Config.pkl"
+
+local fast = new Mapping<String, Step> {
+  ["eslint"] {
+    dir = "call-calendar"
+    glob = List("**/*.ts", "**/*.tsx", "**/*.js")
+    check = "npx --no-install eslint --max-warnings 0 {{files}}"
+  }
+  ["secrets-staged"] {
+    check = "betterleaks git --staged --redact"
+  }
+}
+
+hooks {
+  ["pre-commit"] {
+    fix = false
+    steps = fast
+  }
+  ["pre-push"] {
+    steps {
+      ["quality"] { check = "mise run check" }
+    }
+  }
+  ["check"] {
+    steps {
+      ["eslint"] { check = "mise run lint" }
+      ["secrets"] { check = "mise run secrets" }
+      ["workflows"] { check = "mise run workflows" }
+      ["config"] { check = "mise run config" }
+    }
+  }
+}

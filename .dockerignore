@@ -1,0 +1,14 @@
+**
+!call-calendar/
+call-calendar/*
+!call-calendar/package.json
+!call-calendar/package-lock.json
+!call-calendar/index.html
+!call-calendar/tsconfig*.json
+!call-calendar/vite.config.ts
+!call-calendar/public/
+!call-calendar/public/**
+!call-calendar/server/
+!call-calendar/server/**
+!call-calendar/src/
+!call-calendar/src/**

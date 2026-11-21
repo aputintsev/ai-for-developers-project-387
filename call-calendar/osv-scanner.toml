@@ -1,0 +1,6 @@
+# User-approved temporary exception, scoped to this directory's package-lock.json.
+# Review upstream fixes before expiry; other vulnerabilities remain blocking.
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+effectiveUntil = 2026-11-24
+reason = "Temporary acceptance for picomatch in build tooling; application code does not accept user-supplied glob patterns. Keep Vite local and publish static dist output. Review upstream fixes before expiry."
