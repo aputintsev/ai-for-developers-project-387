@@ -38,7 +38,33 @@ run = "npm --prefix call-calendar run test:smoke"
 run = "betterleaks git --redact"
 
 [tasks.workflows]
-run = "jactionlint --strict-exit --shellcheck=shellcheck"
+run = [
+  "mise run workflows:exception-expiry",
+  "jactionlint --strict-exit --shellcheck=shellcheck",
+]
+
+[tasks."workflows:exception-expiry"]
+run = '''
+python - <<'PY'
+from datetime import date, datetime, timezone
+from pathlib import Path
+import re
+
+workflow = Path(".github/workflows/opencode.yml")
+exception = re.search(
+    r"^  # Exception expires on (\d{4}-\d{2}-\d{2})\.\n"
+    r"  # jactionlint ignore=dangerous-triggers\n"
+    r"  issue_comment:$",
+    workflow.read_text(),
+    re.MULTILINE,
+)
+if not exception:
+    raise SystemExit(f"{workflow}: expected a dated issue_comment exception")
+expiry = date.fromisoformat(exception[1])
+if datetime.now(timezone.utc).date() >= expiry:
+    raise SystemExit(f"{workflow}: dangerous-triggers exception expired on {expiry}")
+PY
+'''
 
 [tasks.config]
 run = "check-jsonschema --schemafile schemas/renovate.schema.json renovate.json"
