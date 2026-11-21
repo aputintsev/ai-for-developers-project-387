@@ -145,6 +145,16 @@ comment and creates no public session link. See
 [OpenCode runs](https://github.com/aputintsev/ai-for-developers-project-387/actions/workflows/opencode.yml)
 in Actions for status and logs.
 
+### Test a PR edit
+
+The draft PR from `test/opencode-patch` into `main` is the test surface.
+Use `/oc draft patch <request>` in its conversation to propose a one-line
+change to `docs/opencode-patch-test.md`. Review the diff and use the ID at the end
+of the proposal comment URL. The repository owner can then post
+`/oc apply patch <comment ID>` in the same PR. The apply job commits only to
+the test branch and requires the head SHA shown in the proposal to still be
+current. Its Actions log links to the commit.
+
 ## Development and quality checks
 
 Install [mise](https://mise.jdx.dev/getting-started.html), then from the repository root:
