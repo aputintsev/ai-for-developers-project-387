@@ -73,13 +73,14 @@ jobs:
           {
             "providers": {
               "opencode-console": {
-                "package": "@opencode/ai/providers/anthropic",
+                "package": "@opencode/ai/providers/openai-compatible",
                 "settings": {
-                  "baseURL": "https://opencode.ai/inference/anthropic/v1",
+                  "baseURL": "https://opencode.ai/inference/openai/v1",
                   "apiKey": "{env:OPENCODE_API_KEY}"
                 },
                 "models": {
-                  "claude-sonnet-5-5": {
+                  "deepseek-v4.1-flash": {
+                    "compatibility": { "reasoningField": "reasoning_content" },
                     "limit": { "context": 1000000, "output": 8000 }
                   }
                 }
@@ -100,7 +101,7 @@ jobs:
             "$request" "$issue")
           reply="$RUNNER_TEMP/opencode-reply.md"
           "$RUNNER_TEMP/opencode-bin/opencode" --standalone run \
-            --agent plan --model opencode-console/claude-sonnet-5-5 "$prompt" > "$reply"
+            --agent plan --model opencode-console/deepseek-v4.1-flash "$prompt" > "$reply"
           if ! test -s "$reply"; then
             printf '%s\n' 'OpenCode did not return an answer.' >&2
             exit 1
