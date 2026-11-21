@@ -121,29 +121,15 @@ Render MCP позволяет проверять состояние сервис
 
 ## OpenCode in GitHub
 
-Use `/oc <request>` or `/opencode <request>` at the start of a new issue or
-pull request comment, including an inline review comment. The workflow listens
-for `issue_comment` and `pull_request_review_comment` with `types: [created]`.
-It checks the author's repository write access and ignores bot commands.
-Pull requests must come from a branch in this repository.
+The `.github/workflows/opencode.yml` workflow answers maintainer requests directly in the discussion where they are posted. It uses the issue and pull request title, body, comments, and inline review comments as context, and follows the GitHub Issues conventions in `docs/agents/issue-tracker.md`. It runs on `issue_comment` and `pull_request_review_comment`, both with `types: [created]`.
 
-OpenCode CLI v2.3.2 uses DeepSeek V4.1 Flash through OpenCode Console, with
-`OPENCODE_API_KEY` stored in GitHub Actions Secrets. The GitHub App alternative
-uses the built-in `GITHUB_TOKEN` in dedicated steps to read the discussion and
-post the reply. The agent reads the default-branch checkout with credential
-persistence disabled. Runs are serialized per issue or pull request.
+A command must be the first thing in a new comment and start with `/oc <request>` or `/opencode <request>`. Only comments from human users are considered: bots are ignored, the author must be `OWNER` or `COLLABORATOR`, and the job re-checks `admin`, `maintain`, or `write` repository permission through `gh api`. Inline review comments are accepted only when the pull request head is a branch in this repository, and `/oc apply patch <comment ID>` is handled by a separate apply job.
 
-The workflow loads `to-spec`, `to-tickets`, and `implement-spec` from
-`.agents/skills/` and uses the tracker settings in `docs/agents/`.
-Use these skills to discuss a spec, tickets, or an implementation plan.
-This job has read access to the checkout, and the publishing job can post a
-reply to the active discussion.
+The agent runs OpenCode CLI v2.3.2 with `opencode-console/deepseek-v4.1-flash` — DeepSeek V4.1 Flash through OpenCode Console — using the `OPENCODE_API_KEY` Actions secret. Authorization relies on the built-in `GITHUB_TOKEN` with minimal per-job permissions instead of a GitHub App, and the default-branch checkout does not persist credentials.
 
-The command filter provides the two default mentions directly. OpenCode V2
-removed session sharing, so the workflow publishes the answer as a GitHub
-comment and creates no public session link. See
-[OpenCode runs](https://github.com/aputintsev/ai-for-developers-project-387/actions/workflows/opencode.yml)
-in Actions for status and logs.
+Runs for the same issue or pull request share a `thread-<number>` concurrency group with `cancel-in-progress: false`, so a new command queues behind the current one instead of interrupting it. Analysis is limited to 8 minutes, while posting the reply and applying a patch each get 2 minutes. The agent may load the `to-spec`, `to-tickets`, and `implement-spec` skills from `.agents/skills/`; every other capability (read, glob, grep) is read-only.
+
+OpenCode V2 no longer shares sessions, so no public session link is created. The result is the reply comment in the original GitHub thread, and run status and logs are available under [OpenCode runs](https://github.com/aputintsev/ai-for-developers-project-387/actions/workflows/opencode.yml).
 
 ### Test a PR edit
 
