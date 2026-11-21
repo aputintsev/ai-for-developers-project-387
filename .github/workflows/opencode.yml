@@ -71,6 +71,20 @@ jobs:
           test -n "$OPENCODE_API_KEY"
           cat > opencode.json <<'JSON'
           {
+            "providers": {
+              "opencode-console": {
+                "package": "@opencode/ai/providers/anthropic",
+                "settings": {
+                  "baseURL": "https://opencode.ai/inference/anthropic/v1",
+                  "apiKey": "{env:OPENCODE_API_KEY}"
+                },
+                "models": {
+                  "claude-sonnet-5-5": {
+                    "limit": { "context": 1000000, "output": 8000 }
+                  }
+                }
+              }
+            },
             "permissions": [
               { "action": "*", "resource": "*", "effect": "deny" },
               { "action": "read", "resource": "*", "effect": "allow" },
@@ -86,7 +100,7 @@ jobs:
             "$request" "$issue")
           reply="$RUNNER_TEMP/opencode-reply.md"
           "$RUNNER_TEMP/opencode-bin/opencode" --standalone run \
-            --agent plan --model opencode/claude-sonnet-5-5 "$prompt" > "$reply"
+            --agent plan --model opencode-console/claude-sonnet-5-5 "$prompt" > "$reply"
           if ! test -s "$reply"; then
             printf '%s\n' 'OpenCode did not return an answer.' >&2
             exit 1
