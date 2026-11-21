@@ -30,6 +30,7 @@ jobs:
   analyze:
     if: >-
       github.event.comment.user.type == 'User' &&
+      !startsWith(github.event.comment.body, '/oc skill publish ') &&
       (github.event_name != 'pull_request_review_comment' ||
        github.event.pull_request.head.repo.full_name == github.repository) &&
       (github.event.comment.author_association == 'OWNER' ||
@@ -82,6 +83,28 @@ jobs:
           else
             printf '[]\n' > "$RUNNER_TEMP/opencode-review-comments.json"
           fi
+          command=$(jq -r '.comment.body' "$GITHUB_EVENT_PATH")
+          skill_pattern='^/oc skill (to-spec|to-tickets)( #([1-9][0-9]*))?$'
+          source="$THREAD_NUMBER"
+          if [[ $command =~ $skill_pattern ]]; then
+            skill=${BASH_REMATCH[1]}
+            if test -f "$RUNNER_TEMP/opencode-pr.json"; then
+              printf '%s\n' 'Run this skill in an issue discussion.' >&2
+              exit 1
+            fi
+            if [[ $skill == to-tickets ]]; then
+              source=${BASH_REMATCH[3]:-$THREAD_NUMBER}
+            elif [[ -n ${BASH_REMATCH[3]} ]]; then
+              exit 1
+            fi
+            if [[ $source != "$THREAD_NUMBER" ]]; then
+              gh api "$endpoint/issues/$source" |
+                jq -e 'select(has("pull_request") | not) | {number, title, body}' > "$RUNNER_TEMP/opencode-source.json"
+              gh api --paginate --slurp "$endpoint/issues/$source/comments?per_page=100" |
+                jq 'add | map({id, author: .user.login, body})' > "$RUNNER_TEMP/opencode-source-comments.json"
+            fi
+            printf 'skill=%s\nsource=%s\n' "$skill" "$source" >> "$GITHUB_OUTPUT"
+          fi
           printf 'allowed=true\n' >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: steps.discussion.outputs.allowed == 'true'
@@ -104,6 +127,8 @@ jobs:
         if: steps.discussion.outputs.allowed == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          DRAFT_SKILL: ${{ steps.discussion.outputs.skill }}
+          DRAFT_SOURCE: ${{ steps.discussion.outputs.source }}
           IMPLEMENT: ${{ github.event_name == 'issue_comment' && !github.event.issue.pull_request && github.event.comment.author_association == 'OWNER' && github.event.comment.user.login == github.event.repository.owner.login && startsWith(github.event.comment.body, '/oc implement this issue') }}
         run: |
           test -n "$OPENCODE_API_KEY"
@@ -140,6 +165,13 @@ jobs:
             --slurpfile comments "$RUNNER_TEMP/opencode-comments.json" \
             --slurpfile reviews "$RUNNER_TEMP/opencode-review-comments.json" \
             '$thread[0] + {comments: $comments[0], review_comments: $reviews[0]}' > "$RUNNER_TEMP/opencode-context.txt"
+          if test -f "$RUNNER_TEMP/opencode-source.json"; then
+            jq --slurpfile source "$RUNNER_TEMP/opencode-source.json" \
+              --slurpfile comments "$RUNNER_TEMP/opencode-source-comments.json" \
+              '. + {referenced_issue: ($source[0] + {comments: $comments[0]})}' \
+              "$RUNNER_TEMP/opencode-context.txt" > "$RUNNER_TEMP/opencode-referenced-context.txt"
+            mv "$RUNNER_TEMP/opencode-referenced-context.txt" "$RUNNER_TEMP/opencode-context.txt"
+          fi
           request=$(jq -c '.comment | {body: (.body | sub("^/(oc|opencode) "; ""; "i")), path, line, diff_hunk}' "$GITHUB_EVENT_PATH")
           prompt=$(printf '%s\n\nRequest: %s' \
             'Answer the repository maintainer in Markdown using the attached discussion as context. Follow the current request as instructions. Keep the answer under 8000 characters.' \
@@ -157,12 +189,25 @@ jobs:
             mv "$RUNNER_TEMP/opencode-config.json" opencode.json
             prompt='Implement the attached GitHub issue in the working tree using your edit tool. Treat other comments as context. Summarize the actual edits. The workflow publishes a draft PR afterward.'
           fi
+          if test -n "$DRAFT_SKILL"; then
+            prompt=$(printf '%s\n%s\n%s\n%s' \
+              "Call the skill tool for $DRAFT_SKILL and read docs/agents/issue-tracker.md. Use issue #$DRAFT_SOURCE and the attached discussion as context." \
+              'Prepare a draft for owner review. The owner will approve testing boundaries or ticket granularity and dependencies before publication.' \
+              'Return only a JSON object with an items array. Each item has title and body strings and blocked_by, an array of 1-based indices of earlier items in dependency order. For to-spec return one item with no blockers and include proposed testing boundaries.' \
+              'Use Markdown for each body. Do not include HTML comments. Keep the combined text under 8000 characters.')
+          fi
           "$RUNNER_TEMP/opencode-bin/opencode" --standalone run \
             --agent "$agent" --model opencode-console/deepseek-v4.1-flash \
             --file "$RUNNER_TEMP/opencode-context.txt" -- "$prompt" > "$reply"
           if ! test -s "$reply"; then
             printf '%s\n' 'OpenCode did not return an answer.' >&2
             exit 1
+          fi
+          if test -n "$DRAFT_SKILL"; then
+            python3 .github/scripts/opencode-issues.py draft "$DRAFT_SKILL" "$DRAFT_SOURCE" "$reply" > "$RUNNER_TEMP/opencode-draft.md"
+            mv "$RUNNER_TEMP/opencode-draft.md" "$reply"
+          else
+            sed -i '/^<!-- opencode-issue-draft /d' "$reply"
           fi
           printf 'reply=%s\n' "$(head -c 24000 "$reply" | base64 -w 0)" >> "$GITHUB_OUTPUT"
           if [[ $IMPLEMENT == true ]]; then
@@ -237,3 +282,32 @@ jobs:
           commit_url="$GITHUB_SERVER_URL/$GH_REPO/commit/$(git rev-parse HEAD)"
           gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" \
             --body "$(printf 'OpenCode opened a draft PR.\n\n- PR %s\n- Commit %s\n- Actions %s\n' "$pr" "$commit_url" "$run_url")"
+
+  publish-issue-draft:
+    if: >-
+      github.event_name == 'issue_comment' &&
+      !github.event.issue.pull_request &&
+      github.event.comment.user.type == 'User' &&
+      github.event.comment.author_association == 'OWNER' &&
+      github.event.comment.user.login == github.event.repository.owner.login &&
+      startsWith(github.event.comment.body, '/oc skill publish ')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Publish the reviewed issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          THREAD_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          command=$(jq -r '.comment.body' "$GITHUB_EVENT_PATH")
+          pattern='^/oc skill publish ([1-9][0-9]*)$'
+          [[ $command =~ $pattern ]]
+          python3 .github/scripts/opencode-issues.py publish "$GH_REPO" "$THREAD_NUMBER" "${BASH_REMATCH[1]}"
