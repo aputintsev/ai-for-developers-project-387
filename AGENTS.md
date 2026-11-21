@@ -23,6 +23,13 @@ Run commands from the repository root:
 - `mise run generate:api`: generate OpenAPI and the client SDK from TypeSpec.
 - `mise run check`: run all quality gates, including security scans; OSV requires network access.
 
+## Pull request review and merge
+
+Agents may open and update pull requests. A human must review the current
+changes and explicitly approve the merge before it happens. Leave merging to
+a human. Agents must not approve pull requests, enable auto-merge, or merge
+pull requests themselves.
+
 ## Commit message conventions
 Follow [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/) for all commit messages:
 
