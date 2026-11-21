@@ -45,6 +45,7 @@ jobs:
       pull-requests: read
     outputs:
       reply: ${{ steps.opencode.outputs.reply }}
+      patch: ${{ steps.opencode.outputs.patch }}
     steps:
       - name: Verify commenter has write access
         env:
@@ -97,7 +98,7 @@ jobs:
         if: steps.discussion.outputs.allowed == 'true'
         with:
           persist-credentials: false
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ github.event_name == 'issue_comment' && github.sha || github.event.repository.default_branch }}
       - name: Install OpenCode
         if: steps.discussion.outputs.allowed == 'true'
         run: |
@@ -114,6 +115,7 @@ jobs:
         if: steps.discussion.outputs.allowed == 'true'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
+          IMPLEMENT: ${{ github.event_name == 'issue_comment' && !github.event.issue.pull_request && github.event.comment.author_association == 'OWNER' && github.event.comment.user.login == github.event.repository.owner.login && startsWith(github.event.comment.body, '/oc implement this issue') }}
         run: |
           test -n "$OPENCODE_API_KEY"
           cat > opencode.json <<'JSON'
@@ -161,8 +163,20 @@ jobs:
               "$request")
           fi
           reply="$RUNNER_TEMP/opencode-reply.md"
+          agent=plan
+          if [[ $IMPLEMENT == true ]]; then
+            agent=build
+            jq '.permissions += [
+              {"action":"edit","resource":"*","effect":"allow"},
+              {"action":"edit","resource":".git/**","effect":"deny"},
+              {"action":"edit","resource":".github/workflows/**","effect":"deny"},
+              {"action":"edit","resource":"opencode.json","effect":"deny"}
+            ]' opencode.json > "$RUNNER_TEMP/opencode-config.json"
+            mv "$RUNNER_TEMP/opencode-config.json" opencode.json
+            prompt='Implement the attached GitHub issue in the working tree using your edit tool. Treat other comments as context. Summarize the actual edits. The workflow publishes a draft PR afterward.'
+          fi
           "$RUNNER_TEMP/opencode-bin/opencode" --standalone run \
-            --agent plan --model opencode-console/deepseek-v4.1-flash \
+            --agent "$agent" --model opencode-console/deepseek-v4.1-flash \
             --file "$attachment" -- "$prompt" > "$reply"
           if ! test -s "$reply"; then
             printf '%s\n' 'OpenCode did not return an answer.' >&2
@@ -182,10 +196,19 @@ jobs:
             sed -i '/^<!-- opencode-patch /d' "$reply"
           fi
           printf 'reply=%s\n' "$(head -c 24000 "$reply" | base64 -w 0)" >> "$GITHUB_OUTPUT"
+          if [[ $IMPLEMENT == true ]]; then
+            rm opencode.json
+            git add --all
+            git diff --cached --check
+            git diff --cached --binary > "$RUNNER_TEMP/opencode.patch"
+            test -s "$RUNNER_TEMP/opencode.patch"
+            test "$(wc -c < "$RUNNER_TEMP/opencode.patch")" -le 90000
+            printf 'patch=%s\n' "$(base64 -w 0 "$RUNNER_TEMP/opencode.patch")" >> "$GITHUB_OUTPUT"
+          fi
 
   reply:
     needs: analyze
-    if: needs.analyze.outputs.reply != ''
+    if: needs.analyze.outputs.reply != '' && needs.analyze.outputs.patch == ''
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions:
@@ -207,6 +230,44 @@ jobs:
           fi
           printf '%s' "$REPLY" | base64 --decode | jq -Rs '{body: .}' |
             gh api "$endpoint" --input - --jq .html_url
+
+  publish-implementation:
+    needs: analyze
+    if: needs.analyze.outputs.patch != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          ref: ${{ github.sha }}
+      - name: Commit and open draft pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          BASE_BRANCH: ${{ github.event.repository.default_branch }}
+          PATCH: ${{ needs.analyze.outputs.patch }}
+        run: |
+          printf '%s' "$PATCH" | base64 --decode > "$RUNNER_TEMP/opencode.patch"
+          git apply --index "$RUNNER_TEMP/opencode.patch"
+          git diff --cached --check
+          git diff --cached --quiet -- .github/workflows
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit -m "feat: implement issue #$ISSUE_NUMBER with OpenCode (#$ISSUE_NUMBER)"
+          branch="opencode/issue-$ISSUE_NUMBER-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          gh auth setup-git
+          git push origin "HEAD:refs/heads/$branch"
+          pr=$(gh pr create --repo "$GH_REPO" --base "$BASE_BRANCH" --head "$branch" --draft \
+            --title "OpenCode implementation for issue #$ISSUE_NUMBER" --body "Closes #$ISSUE_NUMBER")
+          run_url="$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
+          commit_url="$GITHUB_SERVER_URL/$GH_REPO/commit/$(git rev-parse HEAD)"
+          gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" \
+            --body "$(printf 'OpenCode opened a draft PR.\n\n- PR %s\n- Commit %s\n- Actions %s\n' "$pr" "$commit_url" "$run_url")"
 
   apply-test-patch:
     if: >-
