@@ -121,15 +121,40 @@ Render MCP позволяет проверять состояние сервис
 
 ## OpenCode in GitHub
 
-The `.github/workflows/opencode.yml` workflow answers maintainer requests directly in the discussion where they are posted. It uses the issue and pull request title, body, comments, and inline review comments as context, and follows the GitHub Issues conventions in `docs/agents/issue-tracker.md`. It runs on `issue_comment` and `pull_request_review_comment`, both with `types: [created]`.
+The `.github/workflows/opencode.yml` workflow answers maintainer requests in the discussion where they are posted and, for an issue implementation, turns the result into a draft pull request. It uses the issue or pull request title, body, comments, and inline review comments as context, and follows the GitHub Issues conventions in `docs/agents/issue-tracker.md`.
 
-A command must be the first thing in a new comment and start with `/oc <request>` or `/opencode <request>`. Only comments from human users are considered: bots are ignored, the author must be `OWNER` or `COLLABORATOR`, and the job re-checks `admin`, `maintain`, or `write` repository permission through `gh api`. Inline review comments are accepted only when the pull request head is a branch in this repository, and `/oc apply patch <comment ID>` is handled by a separate apply job.
+### Triggers and commands
 
-The agent runs OpenCode CLI v2.3.2 with `opencode-console/deepseek-v4.1-flash` — DeepSeek V4.1 Flash through OpenCode Console — using the `OPENCODE_API_KEY` Actions secret. Authorization relies on the built-in `GITHUB_TOKEN` with minimal per-job permissions instead of a GitHub App, and the default-branch checkout does not persist credentials.
+It runs on `issue_comment` and `pull_request_review_comment`, both with `types: [created]`; editing or deleting a comment does not start a run. A command must be the first text in the comment and begin with `/oc <request>` or `/opencode <request>`. These two prefixes are the complete command set because the analyze job's `if` and the concurrency expression both check `startsWith(..., '/oc ')` or `startsWith(..., '/opencode ')`: the filter in the workflow, not the agent, decides which commands are accepted.
 
-Runs for the same issue or pull request share a `thread-<number>` concurrency group with `cancel-in-progress: false`, so a new command queues behind the current one instead of interrupting it. Analysis is limited to 8 minutes, while posting the reply and applying a patch each get 2 minutes. The agent may load the `to-spec`, `to-tickets`, and `implement-spec` skills from `.agents/skills/`; every other capability (read, glob, grep) is read-only.
+Only comments from human users are considered: bots are ignored, the author must be `OWNER` or `COLLABORATOR`, and the job re-checks `admin`, `maintain`, or `write` repository permission through `gh api`. For pull requests, the workflow proceeds only when the head branch belongs to this repository. The owner-only `/oc apply patch <comment ID>` command is handled by a separate apply job instead of the analyze job.
 
-OpenCode V2 no longer shares sessions, so no public session link is created. The result is the reply comment in the original GitHub thread, and run status and logs are available under [OpenCode runs](https://github.com/aputintsev/ai-for-developers-project-387/actions/workflows/opencode.yml).
+### What the agent can do
+
+The default `plan` run can read with `read`, `glob`, and `grep`, and may load the `to-spec`, `to-tickets`, and `implement-spec` skills from `.agents/skills/`. It cannot edit files or run commands. Its answer is posted in the original thread: an issue or PR conversation comment becomes a new issue comment, and an inline review comment becomes a reply in that review thread.
+
+When the repository owner posts a comment starting with `/oc implement this issue` on an issue (not a pull request), the workflow switches to the `build` agent and allows file edits, except `.git/**`, `.github/workflows/**`, and `opencode.json`. The edited tree is exported as a patch limited to 90 KB. A separate `publish-implementation` job then commits it as `github-actions[bot]` to a fresh `opencode/issue-<number>-<run>-<attempt>` branch, opens a draft PR against the default branch, and comments the commit, PR, and Actions links on the issue. The agent never commits, pushes, or opens the PR itself.
+
+The only other write path is the test surface described under [Test a PR edit](#test-a-pr-edit): `/oc draft patch <request>` proposes a one-line change to `docs/opencode-patch-test.md`, and the owner applies an approved proposal with `/oc apply patch <comment ID>`.
+
+### Model and authorization
+
+The agent runs OpenCode CLI v2.3.2 with `opencode-console/deepseek-v4.1-flash` — DeepSeek V4.1 Flash through OpenCode Console — using the `OPENCODE_API_KEY` Actions secret, and the job fails if the secret is empty.
+
+Unlike a standard GitHub App installation, the workflow does not create a separate bot identity or installation token. OpenCode CLI acts through the built-in `GITHUB_TOKEN`, which is `github-actions[bot]`, and the workflow sets `permissions: {}` at the top level so each job receives only its explicit grant:
+
+- `analyze`: read `contents`, `issues`, and `pull-requests`.
+- `reply`: write `issues` and `pull-requests`.
+- `publish-implementation`: write `contents`, `issues`, and `pull-requests`.
+- `apply-test-patch`: write `contents`, read `issues` and `pull-requests`.
+
+Checkouts use `persist-credentials: false`, so the token is not stored in the Git configuration. The publish job calls `gh auth setup-git` only when it is ready to push.
+
+Runs for the same issue or pull request share a `thread-<number>` concurrency group with `cancel-in-progress: false`, so a new command queues behind the current one instead of interrupting it. Analysis is limited to 8 minutes, publishing the implementation to 5 minutes, and posting the reply or applying a patch to 2 minutes.
+
+### Session sharing and logs
+
+Session sharing is intentionally off: OpenCode V2 no longer shares sessions, the workflow invokes the CLI with `--standalone run`, and it does not pass a share option, so no public OpenCode session link is created or posted. The durable result is the reply comment in the original GitHub thread, or the implementation branch and draft PR. Run status and logs are under [OpenCode runs](https://github.com/aputintsev/ai-for-developers-project-387/actions/workflows/opencode.yml): open the run and its `analyze`, `reply`, `publish-implementation`, or `apply-test-patch` job to read the output. The verified answer and a complete run are [issue #2, comment 7061444570](https://github.com/aputintsev/ai-for-developers-project-387/issues/2#issuecomment-7061444570) and [actions/runs/44895757314](https://github.com/aputintsev/ai-for-developers-project-387/actions/runs/44895757314).
 
 ### Test a PR edit
 
