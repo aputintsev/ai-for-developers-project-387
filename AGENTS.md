@@ -94,6 +94,18 @@ Do not manually edit `call-calendar/package-lock.json`, build output, or
 from its documented upstream URL. Do not edit the generated Hexlet workflow.
 ## Agent skills
 
+### OpenCode commands in GitHub
+
+Start a new comment with the command. Use `/oc <request>` or
+`/opencode <request>` for analysis and replies.
+
+- `/oc implement this issue` lets the repository owner request a draft PR.
+- `/oc skill to-spec` drafts a specification from the current issue.
+- `/oc skill to-tickets` drafts tickets from the current issue. Add `#<number>`
+  to use another issue in this repository as the source.
+- `/oc skill publish <comment ID>` lets the repository owner publish the
+  reviewed draft from the same discussion.
+
 ### Issue tracker
 
 Issues are tracked in GitHub Issues. See `docs/agents/issue-tracker.md`.
