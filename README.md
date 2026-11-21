@@ -119,6 +119,32 @@ Render MCP позволяет проверять состояние сервис
 
 [Хекслет](https://ru.hexlet.io/) — школа программирования: авторские программы обучения с практикой, поддержкой наставников и реальными проектами, которые остаются в резюме. Этот репозиторий — один из таких проектов.
 
+## OpenCode in GitHub
+
+Use `/oc <request>` or `/opencode <request>` at the start of a new issue or
+pull request comment, including an inline review comment. The workflow listens
+for `issue_comment` and `pull_request_review_comment` with `types: [created]`.
+It checks the author's repository write access and ignores bot commands.
+Pull requests must come from a branch in this repository.
+
+OpenCode CLI v2.3.2 uses DeepSeek V4.1 Flash through OpenCode Console, with
+`OPENCODE_API_KEY` stored in GitHub Actions Secrets. The GitHub App alternative
+uses the built-in `GITHUB_TOKEN` in dedicated steps to read the discussion and
+post the reply. The agent reads the default-branch checkout with credential
+persistence disabled. Runs are serialized per issue or pull request.
+
+The workflow loads `to-spec`, `to-tickets`, and `implement-spec` from
+`.agents/skills/` and uses the tracker settings in `docs/agents/`.
+Use these skills to discuss a spec, tickets, or an implementation plan.
+This job has read access to the checkout, and the publishing job can post a
+reply to the active discussion.
+
+The command filter provides the two default mentions directly. OpenCode V2
+removed session sharing, so the workflow publishes the answer as a GitHub
+comment and creates no public session link. See
+[OpenCode runs](https://github.com/aputintsev/ai-for-developers-project-387/actions/workflows/opencode.yml)
+in Actions for status and logs.
+
 ## Development and quality checks
 
 Install [mise](https://mise.jdx.dev/getting-started.html), then from the repository root:

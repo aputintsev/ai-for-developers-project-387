@@ -18,7 +18,7 @@ Run commands from the repository root:
 - `mise run dev`: start Vite in the foreground.
 - `mise run dev:start`, `mise run dev:logs`, `mise run dev:stop`: manage background Vite at `http://localhost:5173`.
 - `mise run build`: type-check and build into `call-calendar/dist/`.
-- `mise run smoke`: run the startup tests.
+- `mise run smoke`: run all tests in `call-calendar/tests/`, including browser tests.
 - `mise run lint` / `mise run fix`: check code or apply available ESLint fixes.
 - `mise run generate:api`: generate OpenAPI and the client SDK from TypeSpec.
 - `mise run check`: run all quality gates, including security scans; OSV requires network access.
