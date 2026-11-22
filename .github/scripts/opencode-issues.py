@@ -41,6 +41,8 @@ def render(draft):
         blockers = ", ".join(map(str, item["blocked_by"])) or "None"
         lines.extend(["", f"### {index}. {item['title']}", "", f"Blocked by draft items: {blockers}", "", item["body"]])
     encoded = base64.b64encode(json.dumps(draft, ensure_ascii=False, separators=(",", ":")).encode()).decode()
+    if draft.get("review_testing") is True:
+        lines.extend(["", "Review the specification and confirm the proposed testing boundaries in Testing Decisions before publishing."])
     lines.extend(["", "After review, the owner can publish this exact draft with `/oc skill publish <comment ID>`.",
                   "", f"{DRAFT_PREFIX}{encoded} -->"])
     result = "\n".join(lines) + "\n"
@@ -153,6 +155,7 @@ def main():
     draft.add_argument("skill", choices=["to-spec", "to-tickets"])
     draft.add_argument("source", type=int)
     draft.add_argument("output", type=Path)
+    draft.add_argument("--title", help="Source issue title for a to-spec draft")
     apply = commands.add_parser("publish")
     apply.add_argument("repo")
     apply.add_argument("thread", type=int)
@@ -162,15 +165,18 @@ def main():
         raw = args.output.read_text().strip()
         try:
             if args.skill == "to-spec":
+                if args.title is None:
+                    raise ValueError("Source issue title is required for to-spec")
                 fenced = re.fullmatch(r"```(?:markdown|md)?\n(.*)\n```", raw, flags=re.DOTALL)
-                title, _, body = (fenced[1] if fenced else raw).strip().partition("\n")
-                if not title.startswith("# "):
-                    raise ValueError("Expected a Markdown title starting with '# '")
-                items = [{"title": title[2:].strip(), "body": body.strip(), "blocked_by": []}]
+                body = fenced[1] if fenced else raw
+                items = [{"title": args.title.strip(), "body": body.strip(), "blocked_by": []}]
             else:
                 fenced = re.fullmatch(r"```(?:json)?\n(.*)\n```", raw, flags=re.DOTALL)
                 items = json.loads(fenced[1] if fenced else raw)["items"]
-            result = render({"skill": args.skill, "source": args.source, "items": items})
+            draft_data = {"skill": args.skill, "source": args.source, "items": items}
+            if args.skill == "to-spec":
+                draft_data["review_testing"] = True
+            result = render(draft_data)
         except json.JSONDecodeError as error:
             parser.exit(1, f"OpenCode draft is not valid JSON (line {error.lineno}, column {error.colno}).\n")
         except ValueError as error:
