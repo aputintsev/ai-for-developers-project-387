@@ -189,14 +189,18 @@ jobs:
             mv "$RUNNER_TEMP/opencode-config.json" opencode.json
             prompt='Implement the attached GitHub issue in the working tree using your edit tool. Treat other comments as context. Summarize the actual edits. The workflow publishes a draft PR afterward.'
           fi
+          draft_args=()
           if test -n "$DRAFT_SKILL"; then
+            draft_args=("$DRAFT_SKILL" "$DRAFT_SOURCE" "$reply")
             prompt=$(printf '%s\n%s' \
               "Call the skill tool for $DRAFT_SKILL and read docs/agents/issue-tracker.md. Use issue #$DRAFT_SOURCE and the attached discussion as context." \
-              'Prepare the complete draft for owner review. The workflow handles publication after approval. Do not ask for confirmation in this run. Do not include HTML comments. Keep the combined text under 8000 characters.')
+              'Prepare the complete draft for owner review. Do not include HTML comments. Keep the combined text under 8000 characters.')
             if [[ $DRAFT_SKILL == to-spec ]]; then
-              draft_format='Return the specification in Markdown. Start with a level-one heading containing the issue title. Include proposed testing boundaries in the body.'
+              title=$(jq -er '.title' "$RUNNER_TEMP/opencode-thread.json")
+              draft_args+=(--title="$title")
+              draft_format='Synthesize the agreed behavior using the skill template. Put the proposed testing boundaries in Testing Decisions. The review comment asks the owner to confirm those boundaries. The owner then authorizes the workflow to publish the reviewed issue with the ready-for-agent label. Return only the Markdown body, starting with the Problem Statement section. The workflow supplies the issue title.'
             else
-              draft_format='Return only a JSON object with an items array. Each item has title and Markdown body strings and blocked_by, an array of 1-based indices of earlier items in dependency order.'
+              draft_format='The workflow handles publication after approval. Do not ask for confirmation in this run. Return only a JSON object with an items array. Each item has title and Markdown body strings and blocked_by, an array of 1-based indices of earlier items in dependency order.'
             fi
             prompt="$prompt"$'\n'"$draft_format"
           fi
@@ -208,10 +212,10 @@ jobs:
           run_opencode "$prompt"
           if test -n "$DRAFT_SKILL"; then
             draft="$RUNNER_TEMP/opencode-draft.md"
-            if ! python3 .github/scripts/opencode-issues.py draft "$DRAFT_SKILL" "$DRAFT_SOURCE" "$reply" > "$draft"; then
+            if ! python3 .github/scripts/opencode-issues.py draft "${draft_args[@]}" > "$draft"; then
               printf '%s\n' 'Retrying OpenCode draft generation once.' >&2
               run_opencode "$prompt"$'\nOmit introductory text and any enclosing code fence. Keep the combined body text under 4000 characters.'
-              python3 .github/scripts/opencode-issues.py draft "$DRAFT_SKILL" "$DRAFT_SOURCE" "$reply" > "$draft"
+              python3 .github/scripts/opencode-issues.py draft "${draft_args[@]}" > "$draft"
             fi
             encoded_reply=$(base64 -w 0 < "$draft")
           else
