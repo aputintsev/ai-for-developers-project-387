@@ -1,0 +1,84 @@
+name: PR 37 independent browser verification
+
+on:
+  push:
+    branches:
+      - verification/pr-37-browser
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  browser:
+    name: Chromium / ${{ matrix.revision }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - revision: before-feature
+            sha: eaf7b120919d0dea8a5af3c7552094d81e2dbca5
+          - revision: before-fix
+            sha: e1334580888ae60f32caa5525bd0cc5b6ce2ff03
+          - revision: pr-head
+            sha: bac196d657c0c7ebe8b15bc75c7cbaa0324ff6f0
+    env:
+      REVISION: ${{ matrix.revision }}
+      REQUESTED_SHA: ${{ matrix.sha }}
+    steps:
+      - name: Verify the PR head
+        if: matrix.revision == 'pr-head'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          live_head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/37" --jq .head.sha)
+          test "$live_head" = "$REQUESTED_SHA"
+      - name: Check out the independent test
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          path: harness
+      - name: Check out the requested application commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          ref: ${{ matrix.sha }}
+          persist-credentials: false
+          path: application
+      - name: Set up Node.js
+        uses: actions/setup-node@395ad3262231945c25e8478fd5baf05154b1d79f # v6.1.0
+        with:
+          node-version: 24.22.3
+          package-manager-cache: false
+      - name: Install locked dependencies and Chromium
+        working-directory: application/call-calendar
+        run: |
+          npm ci
+          npm run install:browser -- --with-deps
+      - name: Verify the working application in Chromium
+        working-directory: application/call-calendar
+        run: |
+          cp "$GITHUB_WORKSPACE/harness/browser-verification.mjs" .independent-browser-verification.mjs
+          node .independent-browser-verification.mjs "$REVISION" "$REQUESTED_SHA" "$GITHUB_WORKSPACE/evidence" "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+      - name: Verify the PR head after the run
+        if: matrix.revision == 'pr-head'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          live_head=$(gh api "repos/$GITHUB_REPOSITORY/pulls/37" --jq .head.sha)
+          test "$live_head" = "$REQUESTED_SHA"
+      - name: Publish the scenario summary
+        if: always()
+        run: |
+          if [[ -f evidence/report.md ]]; then
+            cat evidence/report.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: Upload browser evidence
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: pr-37-${{ matrix.revision }}-${{ matrix.sha }}
+          path: evidence/
+          if-no-files-found: error
