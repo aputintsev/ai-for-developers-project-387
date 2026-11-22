@@ -12,7 +12,8 @@ DRAFT_PREFIX = "<!-- opencode-issue-draft "
 LABEL = "ready-for-agent"
 MAX_DRAFT_BYTES = 60_000
 LEGACY_REVIEW_NOTE = "Review the specification and confirm the proposed testing boundaries in Testing Decisions before publishing."
-REVIEW_NOTE = "Review Testing Decisions. Reply in this discussion to approve the draft for publication or request changes."
+LEGACY_REPLY_REVIEW_NOTE = "Review Testing Decisions. Reply in this discussion to approve the draft for publication or request changes."
+REVIEW_NOTE = LEGACY_REPLY_REVIEW_NOTE
 
 
 def validate(draft):
@@ -36,14 +37,16 @@ def validate(draft):
             raise ValueError(f"Item {index} must reference distinct earlier blockers")
 
 
-def render(draft, *, review_note=REVIEW_NOTE):
+def render(draft, *, review_note=LEGACY_REPLY_REVIEW_NOTE):
     validate(draft)
     lines = [f"## OpenCode draft · {draft['skill']}", "", f"Source issue #{draft['source']}"]
     for index, item in enumerate(draft["items"], start=1):
         blockers = ", ".join(map(str, item["blocked_by"])) or "None"
         lines.extend(["", f"### {index}. {item['title']}", "", f"Blocked by draft items: {blockers}", "", item["body"]])
     encoded = base64.b64encode(json.dumps(draft, ensure_ascii=False, separators=(",", ":")).encode()).decode()
-    if draft.get("review_testing") is True:
+    if "review_note" in draft:
+        lines.extend(["", draft["review_note"]])
+    elif draft.get("review_testing") is True:
         lines.extend(["", review_note])
     lines.extend(["", "After review, the owner can publish this exact draft with `/oc skill publish <comment ID>`.",
                   "", f"{DRAFT_PREFIX}{encoded} -->"])
@@ -93,7 +96,8 @@ def read_draft(body):
     draft = json.loads(base64.b64decode(match[1], validate=True))
     if render(draft).rstrip("\n") == body:
         return draft
-    if draft.get("review_testing") is True and render(draft, review_note=LEGACY_REVIEW_NOTE).rstrip("\n") == body:
+    if ("review_note" not in draft and draft.get("review_testing") is True
+            and render(draft, review_note=LEGACY_REVIEW_NOTE).rstrip("\n") == body):
         return draft
     raise ValueError("Draft data differs from the displayed proposal")
 
@@ -204,7 +208,7 @@ def main():
                 items = json.loads(fenced[1] if fenced else raw)["items"]
             draft_data = {"skill": args.skill, "source": args.source, "items": items}
             if args.skill == "to-spec":
-                draft_data["review_testing"] = True
+                draft_data["review_note"] = REVIEW_NOTE
             result = render(draft_data)
         except json.JSONDecodeError as error:
             parser.exit(1, f"OpenCode draft is not valid JSON (line {error.lineno}, column {error.colno}).\n")
