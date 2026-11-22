@@ -42,7 +42,7 @@ def render(draft):
         lines.extend(["", f"### {index}. {item['title']}", "", f"Blocked by draft items: {blockers}", "", item["body"]])
     encoded = base64.b64encode(json.dumps(draft, ensure_ascii=False, separators=(",", ":")).encode()).decode()
     if draft.get("review_testing") is True:
-        lines.extend(["", "Review the specification and confirm the proposed testing boundaries in Testing Decisions before publishing."])
+        lines.extend(["", "Review Testing Decisions. Reply in this discussion to approve the draft for publication or request changes."])
     lines.extend(["", "After review, the owner can publish this exact draft with `/oc skill publish <comment ID>`.",
                   "", f"{DRAFT_PREFIX}{encoded} -->"])
     result = "\n".join(lines) + "\n"
@@ -82,13 +82,8 @@ def ensure_label(root):
                 raise
 
 
-def publish(repo, thread, comment_id):
-    root = f"repos/{repo}"
-    comment = gh(f"{root}/issues/comments/{comment_id}")
-    expected_issue = f"{os.environ['GITHUB_API_URL']}/{root}/issues/{thread}"
-    if not bot_authored(comment) or comment["issue_url"] != expected_issue:
-        raise ValueError("Expected a bot draft in this discussion")
-    body = comment["body"].rstrip("\n")
+def read_draft(body):
+    body = body.rstrip("\n")
     marker = body.splitlines()[-1] if body else ""
     match = re.fullmatch(re.escape(DRAFT_PREFIX) + r"([A-Za-z0-9+/=]+) -->", marker)
     if not match:
@@ -96,6 +91,33 @@ def publish(repo, thread, comment_id):
     draft = json.loads(base64.b64decode(match[1], validate=True))
     if render(draft).rstrip("\n") != body:
         raise ValueError("Draft data differs from the displayed proposal")
+    return draft
+
+
+def pending_spec(comments, approval):
+    published = set()
+    for comment in comments:
+        if bot_authored(comment) and comment["body"].startswith("## Published OpenCode issues\n"):
+            published.update(re.findall(r"^<!-- opencode-published-summary:([0-9]+) -->$", comment["body"], re.MULTILINE))
+    for comment in reversed(comments):
+        if not bot_authored(comment):
+            continue
+        if not comment["body"].startswith("## OpenCode draft · to-spec\n"):
+            continue
+        if (comment["id"] < approval and str(comment["id"]) not in published
+                and read_draft(comment["body"])["skill"] == "to-spec"):
+            return comment["id"]
+        break
+    return None
+
+
+def publish(repo, thread, comment_id):
+    root = f"repos/{repo}"
+    comment = gh(f"{root}/issues/comments/{comment_id}")
+    expected_issue = f"{os.environ['GITHUB_API_URL']}/{root}/issues/{thread}"
+    if not bot_authored(comment) or comment["issue_url"] != expected_issue:
+        raise ValueError("Expected a bot draft in this discussion")
+    draft = read_draft(comment["body"])
     source = draft["source"]
     if "pull_request" in gh(f"{root}/issues/{source}"):
         raise ValueError("Draft source must be an issue")
@@ -156,6 +178,9 @@ def main():
     draft.add_argument("source", type=int)
     draft.add_argument("output", type=Path)
     draft.add_argument("--title", help="Source issue title for a to-spec draft")
+    pending = commands.add_parser("pending-spec")
+    pending.add_argument("comments", type=Path)
+    pending.add_argument("approval", type=int)
     apply = commands.add_parser("publish")
     apply.add_argument("repo")
     apply.add_argument("thread", type=int)
@@ -184,6 +209,10 @@ def main():
         except (KeyError, TypeError):
             parser.exit(1, "OpenCode draft does not match the required issue format.\n")
         print(result, end="")
+    elif args.command == "pending-spec":
+        comment_id = pending_spec(json.loads(args.comments.read_text()), args.approval)
+        if comment_id is not None:
+            print(comment_id)
     else:
         publish(args.repo, args.thread, args.comment_id)
 
