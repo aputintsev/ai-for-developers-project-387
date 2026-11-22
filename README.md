@@ -149,14 +149,18 @@ default branch.
 
 The workflow verifies that OpenCode published the specification from the source
 issue. It checks the `ready-for-agent` labels, ticket links and dependencies,
-then invokes `@implement-spec` in OpenCode's
-`build` agent. It uses one working tree and processes tickets in dependency
-order. A separate job checks the acceptance-test changes, regenerates API
-artifacts and runs `mise run check`. After the checks pass, the publish job
-opens one draft PR using the repository template. The description includes the
-source, specification, closing references, link to the owner's command, checks,
-risk and rollback. If verification fails, a separate job posts the reason and
-the Actions log link in the source issue.
+then invokes `@implement-spec` in OpenCode's `build` agent. For new tickets,
+use `/oc skill to-tickets #SPEC` to attach them to the published specification.
+Existing tickets attached to the source issue can identify the specification in
+their `Parent` section.
+
+The agent processes the selected tickets in dependency order and updates
+acceptance tests when the approved criteria call for it. A separate job runs
+`mise run check`, including API generation. After verification, the workflow
+opens a draft PR using the repository template and links to the source issue
+and the owner's command. Merging the PR closes the selected tickets and closes
+the specification when the PR covers all of its open tickets. If verification
+fails, the workflow posts the reason and Actions log link in the source issue.
 
 ### PR command limit
 

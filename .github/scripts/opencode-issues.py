@@ -194,6 +194,19 @@ def publish(repo, thread, comment_id):
     print(summary)
 
 
+def parent_specification(body):
+    # Older ticket drafts named the specification in Parent and linked the
+    # ticket to the source issue on GitHub.
+    parent = re.search(r"^## Parent[ \t]*\n(.*?)(?=^## |\Z)", body or "", re.MULTILINE | re.DOTALL)
+    if parent is None:
+        return None
+    references = set(re.findall(
+        r"(?:\bspec(?:ification)?|\bспецификация|\bспека)\s*:\s*#([1-9][0-9]*)\b",
+        parent[1], re.IGNORECASE
+    ))
+    return int(references.pop()) if len(references) == 1 else None
+
+
 def implementation_context(repo, event, spec_number, ticket_numbers):
     root = f"repos/{repo}"
     source = event["issue"]["number"]
@@ -225,14 +238,18 @@ def implementation_context(repo, event, spec_number, ticket_numbers):
         return {key: issue[key] for key in ("number", "title", "body", "html_url")}
 
     linked = {
-        issue["number"]
-        for parent in (source, spec_number)
-        for issue in paginate(f"{root}/issues/{parent}/sub_issues?per_page=100")
+        issue["number"]: issue
+        for issue in paginate(f"{root}/issues/{source}/sub_issues?per_page=100")
+        if parent_specification(issue["body"]) == spec_number
     }
+    linked.update({
+        issue["number"]: issue
+        for issue in paginate(f"{root}/issues/{spec_number}/sub_issues?per_page=100")
+    })
     tickets = []
     for number in ticket_numbers:
         if number not in linked:
-            raise ValueError(f"#{number} must be a sub-issue of #{source} or #{spec_number}")
+            raise ValueError(f"#{number} must belong to specification #{spec_number}")
         ticket = issue_context(open_issue(number))
         blockers = [
             item["number"]
@@ -246,14 +263,19 @@ def implementation_context(repo, event, spec_number, ticket_numbers):
     return {
         "source": issue_context(original),
         "specification": issue_context(spec),
+        "close_specification": all(
+            issue["state"] == "closed" or number in ticket_numbers
+            for number, issue in linked.items()
+        ),
         "tickets": tickets,
         "owner_approval": event["comment"]["html_url"],
     }
 
 
 def implementation_pr_body(template, links, summary, sha, run_url):
-    sections = re.split(r"^## (Change|Risk|Rollback)[ \t]*\r?$", summary, flags=re.MULTILINE)
-    content = dict(zip(sections[1::2], sections[2::2]))
+    sections = re.split(r"^## (Change|Checks|Risk|Rollback)[ \t]*\r?$", summary,
+                        flags=re.MULTILINE | re.IGNORECASE)
+    content = {name.capitalize(): text for name, text in zip(sections[1::2], sections[2::2])}
     change = content.get("Change", sections[0]).strip() or "Implements the linked specification and tickets."
     risk = content.get("Risk", "").strip() or (
         "Users of the changed flow could encounter a regression. Review the affected behavior "
