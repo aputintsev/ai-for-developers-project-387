@@ -190,11 +190,15 @@ jobs:
             prompt='Implement the attached GitHub issue in the working tree using your edit tool. Treat other comments as context. Summarize the actual edits. The workflow publishes a draft PR afterward.'
           fi
           if test -n "$DRAFT_SKILL"; then
-            prompt=$(printf '%s\n%s\n%s\n%s' \
+            prompt=$(printf '%s\n%s' \
               "Call the skill tool for $DRAFT_SKILL and read docs/agents/issue-tracker.md. Use issue #$DRAFT_SOURCE and the attached discussion as context." \
-              'Prepare a draft for owner review. The owner will approve testing boundaries or ticket granularity and dependencies before publication.' \
-              'Return only a JSON object with an items array. Each item has title and body strings and blocked_by, an array of 1-based indices of earlier items in dependency order. For to-spec return one item with no blockers and include proposed testing boundaries.' \
-              'Use Markdown for each body. Do not include HTML comments. Keep the combined text under 8000 characters.')
+              'Prepare the complete draft for owner review. The workflow handles publication after approval. Do not ask for confirmation in this run. Do not include HTML comments. Keep the combined text under 8000 characters.')
+            if [[ $DRAFT_SKILL == to-spec ]]; then
+              draft_format='Return the specification in Markdown. Start with a level-one heading containing the issue title. Include proposed testing boundaries in the body.'
+            else
+              draft_format='Return only a JSON object with an items array. Each item has title and Markdown body strings and blocked_by, an array of 1-based indices of earlier items in dependency order.'
+            fi
+            prompt="$prompt"$'\n'"$draft_format"
           fi
           run_opencode() {
             "$RUNNER_TEMP/opencode-bin/opencode" --standalone run \
@@ -206,7 +210,7 @@ jobs:
             draft="$RUNNER_TEMP/opencode-draft.md"
             if ! python3 .github/scripts/opencode-issues.py draft "$DRAFT_SKILL" "$DRAFT_SOURCE" "$reply" > "$draft"; then
               printf '%s\n' 'Retrying OpenCode draft generation once.' >&2
-              run_opencode "$prompt"$'\nStart your final response with { and end with }. Omit code fences and introductory text. Keep the combined body text under 4000 characters.'
+              run_opencode "$prompt"$'\nOmit introductory text and any enclosing code fence. Keep the combined body text under 4000 characters.'
               python3 .github/scripts/opencode-issues.py draft "$DRAFT_SKILL" "$DRAFT_SOURCE" "$reply" > "$draft"
             fi
             encoded_reply=$(base64 -w 0 < "$draft")

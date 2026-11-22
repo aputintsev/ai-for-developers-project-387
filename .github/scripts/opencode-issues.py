@@ -160,13 +160,19 @@ def main():
     args = parser.parse_args()
     if args.command == "draft":
         raw = args.output.read_text().strip()
-        fenced = re.fullmatch(r"```(?:json)?\n(.*)\n```", raw, flags=re.DOTALL)
         try:
-            response = json.loads(fenced[1] if fenced else raw)
+            if args.skill == "to-spec":
+                fenced = re.fullmatch(r"```(?:markdown|md)?\n(.*)\n```", raw, flags=re.DOTALL)
+                title, _, body = (fenced[1] if fenced else raw).strip().partition("\n")
+                if not title.startswith("# "):
+                    raise ValueError("Expected a Markdown title starting with '# '")
+                items = [{"title": title[2:].strip(), "body": body.strip(), "blocked_by": []}]
+            else:
+                fenced = re.fullmatch(r"```(?:json)?\n(.*)\n```", raw, flags=re.DOTALL)
+                items = json.loads(fenced[1] if fenced else raw)["items"]
+            result = render({"skill": args.skill, "source": args.source, "items": items})
         except json.JSONDecodeError as error:
             parser.exit(1, f"OpenCode draft is not valid JSON (line {error.lineno}, column {error.colno}).\n")
-        try:
-            result = render({"skill": args.skill, "source": args.source, "items": response["items"]})
         except ValueError as error:
             parser.exit(1, f"Invalid OpenCode draft: {error}.\n")
         except (KeyError, TypeError):
