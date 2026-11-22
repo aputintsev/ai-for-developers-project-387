@@ -214,6 +214,53 @@ test('a Guest keeps contact details after a slot conflict and confirms a new tim
   }
 }, 15_000)
 
+test('a Guest keeps the draft details after a conflict and a date change', async () => {
+  const allDay = { ...intro, id: 'all-day', name: 'Весь день', durationMinutes: 480 }
+  const baseUrl = await startCalendar([allDay])
+  const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHROMIUM_CHANNEL })
+  try {
+    const page = await browser.newPage({ timezoneId: 'America/Los_Angeles' })
+    await page.clock.setFixedTime(now)
+    await page.goto(`${baseUrl}/book`)
+    await page.getByRole('button', { name: allDay.name, exact: true }).click()
+    await page.getByLabel('Дата встречи').fill('2026-11-20')
+    await page.getByRole('button', { name: '10:00–18:00' }).click()
+
+    const form = page.getByRole('form', { name: 'Подтверждение записи' })
+    const conversationTopic = form.getByLabel('Тема разговора', { exact: true })
+    const name = form.getByLabel('Имя', { exact: true })
+    const email = form.getByLabel('Email', { exact: true })
+    await conversationTopic.fill(guest.topic)
+    await name.fill(guest.guestName)
+    await email.fill(guest.guestEmail)
+
+    const competing = await book(baseUrl, { ...guest, meetingTypeId: allDay.id, start })
+    expect(competing.status).toBe(201)
+
+    await form.getByRole('button', { name: 'Подтвердить запись' }).click()
+    await page.getByText(conflictMessage, { exact: true }).waitFor()
+    await page.getByText('На эту дату нет свободных слотов.', { exact: true }).waitFor()
+
+    await page.getByLabel('Дата встречи').fill('2026-11-23')
+    await page.getByRole('button', { name: '10:00–18:00' }).waitFor()
+    expect(await form.count()).toBe(0)
+    await page.getByRole('button', { name: '10:00–18:00' }).click()
+    await form.waitFor()
+
+    expect(await conversationTopic.inputValue()).toBe(guest.topic)
+    expect(await name.inputValue()).toBe(guest.guestName)
+    expect(await email.inputValue()).toBe(guest.guestEmail)
+    await form.getByRole('button', { name: 'Подтвердить запись' }).click()
+
+    const confirmation = page.getByRole('region', { name: 'Вы записаны' })
+    await confirmation.getByText(guest.topic, { exact: true }).waitFor()
+    await confirmation.getByText('23.11.2026', { exact: true }).waitFor()
+    await confirmation.getByText('10:00–18:00', { exact: true }).waitFor()
+  } finally {
+    await browser.close()
+  }
+}, 15_000)
+
 test('a slot conflict brings the message into view after another Guest books the same time', async () => {
   const baseUrl = await startCalendar()
   const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHROMIUM_CHANNEL })

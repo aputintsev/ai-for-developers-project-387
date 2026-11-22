@@ -39,17 +39,24 @@ type BookingSubmission = {
   setSubmitting: (submitting: boolean) => void
 }
 
-function BookingDay({ meetingType, date, submitting, setSubmitting }: BookingSubmission & {
+type BookingDraft = {
+  topic: string
+  guestName: string
+  guestEmail: string
+}
+
+const emptyDraft: BookingDraft = { topic: '', guestName: '', guestEmail: '' }
+
+function BookingDay({ meetingType, date, draft, onDraftChange, submitting, setSubmitting }: BookingSubmission & {
   meetingType: MeetingType
   date: string
+  draft: BookingDraft
+  onDraftChange: (draft: BookingDraft) => void
 }) {
   const [availability, setAvailability] = useState<Slot[] | 'loading' | string>('loading')
   const [revision, setRevision] = useState(0)
   const [slot, setSlot] = useState<Slot>()
   const [booking, setBooking] = useState<Booking>()
-  const [topic, setTopic] = useState('')
-  const [guestName, setGuestName] = useState('')
-  const [guestEmail, setGuestEmail] = useState('')
   const [message, setMessage] = useState('')
   const [fieldErrors, setFieldErrors] = useState<CreateBooking400FieldErrors>({})
   const meetingTypeId = meetingType.id
@@ -78,7 +85,7 @@ function BookingDay({ meetingType, date, submitting, setSubmitting }: BookingSub
     setMessage('')
     setFieldErrors({})
     try {
-      const submit = () => createBooking({ meetingTypeId, start: slot.start, topic, guestName, guestEmail })
+      const submit = () => createBooking({ meetingTypeId, start: slot.start, ...draft })
       // Let the first response set the Guest profile cookie before another tab submits.
       const { status, data } = await (navigator.locks
         ? navigator.locks.request('calendar-guest-booking', submit)
@@ -136,8 +143,8 @@ function BookingDay({ meetingType, date, submitting, setSubmitting }: BookingSub
             Тема разговора
             <input
               className={inputClass}
-              value={topic}
-              onChange={(event) => setTopic(event.currentTarget.value)}
+              value={draft.topic}
+              onChange={(event) => onDraftChange({ ...draft, topic: event.currentTarget.value })}
               maxLength={100}
               required
               disabled={submitting}
@@ -150,8 +157,8 @@ function BookingDay({ meetingType, date, submitting, setSubmitting }: BookingSub
             Имя
             <input
               className={inputClass}
-              value={guestName}
-              onChange={(event) => setGuestName(event.currentTarget.value)}
+              value={draft.guestName}
+              onChange={(event) => onDraftChange({ ...draft, guestName: event.currentTarget.value })}
               autoComplete="name"
               required
               disabled={submitting}
@@ -165,8 +172,8 @@ function BookingDay({ meetingType, date, submitting, setSubmitting }: BookingSub
             <input
               className={inputClass}
               type="email"
-              value={guestEmail}
-              onChange={(event) => setGuestEmail(event.currentTarget.value)}
+              value={draft.guestEmail}
+              onChange={(event) => onDraftChange({ ...draft, guestEmail: event.currentTarget.value })}
               autoComplete="email"
               required
               disabled={submitting}
@@ -217,6 +224,7 @@ export default function BookingAvailability({ meetingType, submitting, setSubmit
   meetingType: MeetingType
 }) {
   const [date, setDate] = useState('')
+  const [draft, setDraft] = useState(emptyDraft)
   const { first, last } = bookingWindow(new Date())
 
   return (
@@ -239,6 +247,8 @@ export default function BookingAvailability({ meetingType, submitting, setSubmit
           key={date}
           meetingType={meetingType}
           date={date}
+          draft={draft}
+          onDraftChange={setDraft}
           submitting={submitting}
           setSubmitting={setSubmitting}
         />
