@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/aputintsev/ai-for-developers-project-387/compare/v0.1.1...v0.2.0) (2026-11-22)
+
+
+### Features
+
+* implement issue [#14](https://github.com/aputintsev/ai-for-developers-project-387/issues/14) with OpenCode ([#14](https://github.com/aputintsev/ai-for-developers-project-387/issues/14)) ([e133458](https://github.com/aputintsev/ai-for-developers-project-387/commit/e1334580888ae60f32caa5525bd0cc5b6ce2ff03))
+
+
+### Bug Fixes
+
+* apply OpenCode review changes ([#37](https://github.com/aputintsev/ai-for-developers-project-387/issues/37)) ([bac196d](https://github.com/aputintsev/ai-for-developers-project-387/commit/bac196d657c0c7ebe8b15bc75c7cbaa0324ff6f0))
+
 ## [0.1.1](https://github.com/aputintsev/ai-for-developers-project-386/compare/v0.1.0...v0.1.1) (2026-11-18)
 
 
