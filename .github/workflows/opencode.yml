@@ -22,8 +22,10 @@ concurrency:
        github.event.comment.author_association == 'COLLABORATOR') &&
       ((github.event_name == 'issue_comment' && !github.event.issue.pull_request &&
         github.event.comment.user.login == github.event.repository.owner.login) ||
-       startsWith(github.event.comment.body, '/oc ') ||
-       startsWith(github.event.comment.body, '/opencode '))) &&
+       contains(github.event.comment.body, ' /oc') ||
+       startsWith(github.event.comment.body, '/oc') ||
+       contains(github.event.comment.body, ' /opencode') ||
+       startsWith(github.event.comment.body, '/opencode'))) &&
       format('thread-{0}', github.event.issue.number || github.event.pull_request.number) ||
       format('run-{0}', github.run_id) }}
   cancel-in-progress: false
@@ -32,15 +34,16 @@ jobs:
   analyze:
     if: >-
       github.event.comment.user.type == 'User' &&
-      !startsWith(github.event.comment.body, '/oc skill publish ') &&
       (github.event_name != 'pull_request_review_comment' ||
        github.event.pull_request.head.repo.full_name == github.repository) &&
       (github.event.comment.author_association == 'OWNER' ||
        github.event.comment.author_association == 'COLLABORATOR') &&
       ((github.event_name == 'issue_comment' && !github.event.issue.pull_request &&
         github.event.comment.user.login == github.event.repository.owner.login) ||
-       startsWith(github.event.comment.body, '/oc ') ||
-       startsWith(github.event.comment.body, '/opencode '))
+       contains(github.event.comment.body, ' /oc') ||
+       startsWith(github.event.comment.body, '/oc') ||
+       contains(github.event.comment.body, ' /opencode') ||
+       startsWith(github.event.comment.body, '/opencode'))
     runs-on: ubuntu-24.04
     timeout-minutes: 8
     permissions:
@@ -50,7 +53,7 @@ jobs:
     outputs:
       reply: ${{ steps.opencode.outputs.reply }}
       patch: ${{ steps.opencode.outputs.patch }}
-      approved-spec: ${{ steps.opencode.outputs.approved_spec }}
+      approved-spec: ${{ steps.discussion.outputs.publish || steps.opencode.outputs.approved_spec }}
     steps:
       - name: Verify commenter has write access
         env:
@@ -69,7 +72,36 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           THREAD_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+          OWNER_ISSUE_COMMENT: ${{ github.event_name == 'issue_comment' && !github.event.issue.pull_request && github.event.comment.author_association == 'OWNER' && github.event.comment.user.login == github.event.repository.owner.login }}
         run: |
+          jq -c '
+            .comment | {body, path, line, diff_hunk} |
+            ([.body | match("(^|[[:space:]])/(oc|opencode)([[:space:]]+|$)"; "i")][0]) as $prefix |
+            if $prefix then
+              .body |= .[$prefix.offset + $prefix.length:] |
+              .command = true
+            else
+              .command = false
+            end
+          ' "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/opencode-request.json"
+          if jq -e '.command' "$RUNNER_TEMP/opencode-request.json" >/dev/null; then
+            command=$(jq -r '.body' "$RUNNER_TEMP/opencode-request.json")
+            publish_pattern='^skill publish ([1-9][0-9]*)$'
+            if [[ $command == 'skill publish '* ]]; then
+              if [[ $OWNER_ISSUE_COMMENT == true && $command =~ $publish_pattern ]]; then
+                printf 'publish=%s\n' "${BASH_REMATCH[1]}" >> "$GITHUB_OUTPUT"
+              fi
+              exit 0
+            fi
+            printf 'command=true\n' >> "$GITHUB_OUTPUT"
+            if [[ $OWNER_ISSUE_COMMENT == true && $command == 'implement this issue'* ]]; then
+              printf 'implement=true\n' >> "$GITHUB_OUTPUT"
+            fi
+          elif [[ $OWNER_ISSUE_COMMENT == true ]]; then
+            command=''
+          else
+            exit 0
+          fi
           endpoint="repos/$GH_REPO"
           if jq -e '.pull_request or .issue.pull_request' "$GITHUB_EVENT_PATH" >/dev/null; then
             gh api "$endpoint/pulls/$THREAD_NUMBER" > "$RUNNER_TEMP/opencode-pr.json"
@@ -88,8 +120,7 @@ jobs:
           else
             printf '[]\n' > "$RUNNER_TEMP/opencode-review-comments.json"
           fi
-          command=$(jq -r '.comment.body' "$GITHUB_EVENT_PATH")
-          skill_pattern='^/oc skill (to-spec|to-tickets)( #([1-9][0-9]*))?$'
+          skill_pattern='^skill (to-spec|to-tickets)( #([1-9][0-9]*))?$'
           source="$THREAD_NUMBER"
           if [[ $command =~ $skill_pattern ]]; then
             skill=${BASH_REMATCH[1]}
@@ -110,9 +141,6 @@ jobs:
             fi
             printf 'skill=%s\nsource=%s\n' "$skill" "$source" >> "$GITHUB_OUTPUT"
           fi
-          if jq -e '.comment.body | test("^/(oc|opencode) "; "i")' "$GITHUB_EVENT_PATH" >/dev/null; then
-            printf 'command=true\n' >> "$GITHUB_OUTPUT"
-          fi
           printf 'allowed=true\n' >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: steps.discussion.outputs.allowed == 'true'
@@ -126,7 +154,7 @@ jobs:
           steps.discussion.outputs.skill == '' &&
           github.event_name == 'issue_comment' && !github.event.issue.pull_request &&
           github.event.comment.user.login == github.event.repository.owner.login &&
-          !startsWith(github.event.comment.body, '/oc implement this issue')
+          steps.discussion.outputs.implement != 'true'
         run: |
           approval_id=$(jq -r '.comment.id' "$GITHUB_EVENT_PATH")
           candidate=$(python3 .github/scripts/opencode-issues.py pending-spec \
@@ -152,7 +180,7 @@ jobs:
           DRAFT_SOURCE: ${{ steps.discussion.outputs.source }}
           APPROVAL_CANDIDATE: ${{ steps.pending.outputs.candidate }}
           IS_COMMAND: ${{ steps.discussion.outputs.command }}
-          IMPLEMENT: ${{ github.event_name == 'issue_comment' && !github.event.issue.pull_request && github.event.comment.author_association == 'OWNER' && github.event.comment.user.login == github.event.repository.owner.login && startsWith(github.event.comment.body, '/oc implement this issue') }}
+          IMPLEMENT: ${{ steps.discussion.outputs.implement }}
         run: |
           test -n "$OPENCODE_API_KEY"
           cat > opencode.json <<'JSON'
@@ -195,7 +223,7 @@ jobs:
               "$RUNNER_TEMP/opencode-context.txt" > "$RUNNER_TEMP/opencode-referenced-context.txt"
             mv "$RUNNER_TEMP/opencode-referenced-context.txt" "$RUNNER_TEMP/opencode-context.txt"
           fi
-          request=$(jq -c '.comment | {body: (.body | sub("^/(oc|opencode) "; ""; "i")), path, line, diff_hunk}' "$GITHUB_EVENT_PATH")
+          request=$(jq -c 'del(.command)' "$RUNNER_TEMP/opencode-request.json")
           prompt=$(printf '%s\n\nRequest: %s' \
             'Answer the repository maintainer in Markdown using the attached discussion as context. Follow the current request as instructions. Keep the answer under 8000 characters.' \
             "$request")
@@ -343,14 +371,12 @@ jobs:
   publish-issue-draft:
     needs: analyze
     if: >-
-      always() && !cancelled() &&
       github.event_name == 'issue_comment' &&
       !github.event.issue.pull_request &&
       github.event.comment.user.type == 'User' &&
       github.event.comment.author_association == 'OWNER' &&
       github.event.comment.user.login == github.event.repository.owner.login &&
-      (startsWith(github.event.comment.body, '/oc skill publish ') ||
-       (needs.analyze.result == 'success' && needs.analyze.outputs.approved-spec != ''))
+      needs.analyze.outputs.approved-spec != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
@@ -368,10 +394,5 @@ jobs:
           THREAD_NUMBER: ${{ github.event.issue.number }}
           APPROVED_SPEC: ${{ needs.analyze.outputs.approved-spec }}
         run: |
-          command=$(jq -r '.comment.body' "$GITHUB_EVENT_PATH")
-          pattern='^/oc skill publish ([1-9][0-9]*)$'
-          if [[ $command =~ $pattern ]]; then
-            APPROVED_SPEC=${BASH_REMATCH[1]}
-          fi
           [[ $APPROVED_SPEC =~ ^[1-9][0-9]*$ ]]
           python3 .github/scripts/opencode-issues.py publish "$GH_REPO" "$THREAD_NUMBER" "$APPROVED_SPEC"
