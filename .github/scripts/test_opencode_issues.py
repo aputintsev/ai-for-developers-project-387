@@ -24,7 +24,8 @@ class ImplementationContextTests(unittest.TestCase):
         self.records = {
             number: {
                 "number": number, "state": "open", "labels": [{"name": issues.LABEL}],
-                "title": f"Issue {number}", "body": "", "html_url": f"issue-{number}",
+                "title": f"Issue {number}", "body": "",
+                "html_url": f"https://github.com/{self.repo}/issues/{number}",
                 "url": f"https://api.github.com/{self.root}/{number}", "user": self.bot,
             }
             for number in (14, 21, 23, 24)
@@ -40,6 +41,17 @@ class ImplementationContextTests(unittest.TestCase):
             }),
         }
         self.pages = {
+            f"{self.root}/14/comments?per_page=100": [
+                dict(self.comment, id=123),
+                {"id": 124, "user": self.bot, "body": (
+                    f"## Published OpenCode issues\n\n- {self.records[21]['html_url']}\n\n"
+                    "<!-- opencode-published-summary:123 -->"
+                )},
+                {"id": 125, "user": self.bot, "body": (
+                    f"## Published OpenCode issues\n\n- {self.records[23]['html_url']}\n\n"
+                    "<!-- opencode-published-summary:999 -->"
+                )},
+            ],
             f"{self.root}/14/sub_issues?per_page=100": [self.records[23], self.records[24]],
             f"{self.root}/21/sub_issues?per_page=100": [],
             f"{self.root}/23/dependencies/blocked_by?per_page=100": [
@@ -73,6 +85,45 @@ class ImplementationContextTests(unittest.TestCase):
         self.assertTrue(context["close_specification"])
         self.assertEqual([ticket["blocked_by"] for ticket in context["tickets"]], [[], [23]])
         self.assertEqual(context["owner_approval"], "approval-url")
+
+    def run_implementation_request(self, command):
+        with tempfile.TemporaryDirectory() as folder:
+            event = Path(folder) / "event.json"
+            event.write_text(json.dumps(self.event))
+            request = Path(folder) / "request.json"
+            request.write_text(json.dumps({"body": command}))
+            args = ["opencode-issues.py", "implementation-context", self.repo, str(event),
+                    "--request", str(request)]
+            stdout = io.StringIO()
+            with patch("sys.argv", args), contextlib.redirect_stdout(stdout):
+                issues.main()
+        return json.loads(stdout.getvalue())
+
+    def test_implementation_request_preserves_explicit_tickets(self):
+        for command in ("skill implement-spec #21 #23", "skill implement-spec: #21 #23"):
+            with self.subTest(command=command):
+                context = self.run_implementation_request(command)
+                self.assertEqual(context["specification"]["number"], 21)
+                self.assertEqual([ticket["number"] for ticket in context["tickets"]], [23])
+
+    def test_implementation_request_discovers_scope_for_short_command_or_explanation(self):
+        for command in ("skill implement-spec", "skill implement-spec - выполни спецификацию",
+                        "skill implement-spec: подготовь черновик PR", "skill implement-spec #21"):
+            with self.subTest(command=command):
+                context = self.run_implementation_request(command)
+                self.assertEqual(context["specification"]["number"], 21)
+                self.assertEqual([ticket["number"] for ticket in context["tickets"]], [23, 24])
+
+    def test_implementation_request_rejects_numbers_mixed_with_explanation(self):
+        for command in ("skill implement-spec: #21 #23 и подготовь PR",
+                        "skill implement-spec - выполни только #23", "skill implement-spec #21 #0"):
+            with self.subTest(command=command):
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as error:
+                    self.run_implementation_request(command)
+                self.assertEqual(error.exception.code, 1)
+                self.assertIn("Use /oc skill implement-spec", stderr.getvalue())
+        self.mock_gh.assert_not_called()
 
     def test_rejects_duplicates_before_github_calls(self):
         with self.assertRaisesRegex(ValueError, "distinct"):
@@ -123,6 +174,39 @@ class ImplementationContextTests(unittest.TestCase):
         self.assertFalse(self.load((23,))["close_specification"])
         self.records[24]["state"] = "closed"
         self.assertTrue(self.load((23,))["close_specification"])
+
+    def test_discovers_specification_and_open_tickets(self):
+        self.records[23]["state"] = "closed"
+        self.pages[f"{self.root}/24/dependencies/blocked_by?per_page=100"][0]["state"] = "closed"
+        context = issues.implementation_context(self.repo, self.event, None, [])
+        self.assertEqual(context["specification"]["number"], 21)
+        self.assertEqual([ticket["number"] for ticket in context["tickets"]], [24])
+
+    def test_explicit_specification_discovers_tickets_without_reading_comments(self):
+        del self.pages[f"{self.root}/14/comments?per_page=100"]
+        context = self.load(())
+        self.assertEqual([ticket["number"] for ticket in context["tickets"]], [23, 24])
+
+    def test_multiple_open_specifications_require_explicit_selection(self):
+        self.records[22] = dict(self.records[21], number=22)
+        comments = self.pages[f"{self.root}/14/comments?per_page=100"]
+        comments.extend([
+            dict(self.comment, id=126),
+            {"id": 127, "user": self.bot, "body": (
+                f"## Published OpenCode issues\n\n- https://github.com/{self.repo}/issues/22\n\n"
+                "<!-- opencode-published-summary:126 -->"
+            )},
+        ])
+        with self.assertRaisesRegex(ValueError, "Multiple open specifications for #14: #21, #22"):
+            issues.implementation_context(self.repo, self.event, None, [])
+        self.records[22]["state"] = "closed"
+        self.assertEqual(issues.implementation_context(self.repo, self.event, None, [])
+                         ["specification"]["number"], 21)
+
+    def test_without_published_specification_reports_how_to_continue(self):
+        self.pages[f"{self.root}/14/comments?per_page=100"] = []
+        with self.assertRaisesRegex(ValueError, "No open published specification for #14"):
+            issues.implementation_context(self.repo, self.event, None, [])
 
     def test_rejects_open_blocker_outside_scope(self):
         with self.assertRaisesRegex(ValueError, "unresolved blockers"):
