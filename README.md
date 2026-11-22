@@ -138,6 +138,8 @@ When the repository owner posts a comment starting with `/oc implement this issu
 ### Draft and publish issues
 
 - `/oc skill to-spec` drafts a specification from the issue and its discussion.
+  You can also ask in your own words, for example
+  `/oc запусти скилл to-spec на основе переписки`.
   The owner can approve the latest draft for publication by replying in their
   own words in the same discussion.
 - `/oc skill to-tickets` drafts tickets from the current issue.
