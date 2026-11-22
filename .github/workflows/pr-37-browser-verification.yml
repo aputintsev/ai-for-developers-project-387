@@ -5,6 +5,10 @@ on:
     branches:
       - verification/pr-37-browser
 
+concurrency:
+  group: pr-37-browser-verification
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: read
