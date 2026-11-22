@@ -13,7 +13,7 @@ LABEL = "ready-for-agent"
 MAX_DRAFT_BYTES = 60_000
 LEGACY_REVIEW_NOTE = "Review the specification and confirm the proposed testing boundaries in Testing Decisions before publishing."
 LEGACY_REPLY_REVIEW_NOTE = "Review Testing Decisions. Reply in this discussion to approve the draft for publication or request changes."
-REVIEW_NOTE = LEGACY_REPLY_REVIEW_NOTE
+TICKETS_REVIEW_NOTE = "Review the proposed tickets and dependencies. Reply in this discussion to approve the draft for publication or request changes."
 
 
 def validate(draft):
@@ -102,18 +102,18 @@ def read_draft(body):
     raise ValueError("Draft data differs from the displayed proposal")
 
 
-def pending_spec(comments, approval):
+def pending_draft(comments, approval):
     published = set()
     for comment in comments:
         if bot_authored(comment) and comment["body"].startswith("## Published OpenCode issues\n"):
             published.update(re.findall(r"^<!-- opencode-published-summary:([0-9]+) -->$", comment["body"], re.MULTILINE))
     for comment in reversed(comments):
-        if not bot_authored(comment):
+        if comment["id"] >= approval or not bot_authored(comment):
             continue
-        if not comment["body"].startswith("## OpenCode draft · to-spec\n"):
+        if not comment["body"].startswith(("## OpenCode draft · to-spec\n", "## OpenCode draft · to-tickets\n")):
             continue
-        if (comment["id"] < approval and str(comment["id"]) not in published
-                and read_draft(comment["body"])["skill"] == "to-spec"):
+        if str(comment["id"]) not in published:
+            read_draft(comment["body"])
             return comment["id"]
         break
     return None
@@ -186,7 +186,7 @@ def main():
     draft.add_argument("source", type=int)
     draft.add_argument("output", type=Path)
     draft.add_argument("--title", help="Source issue title for a to-spec draft")
-    pending = commands.add_parser("pending-spec")
+    pending = commands.add_parser("pending-draft")
     pending.add_argument("comments", type=Path)
     pending.add_argument("approval", type=int)
     apply = commands.add_parser("publish")
@@ -207,8 +207,9 @@ def main():
                 fenced = re.fullmatch(r"```(?:json)?\n(.*)\n```", raw, flags=re.DOTALL)
                 items = json.loads(fenced[1] if fenced else raw)["items"]
             draft_data = {"skill": args.skill, "source": args.source, "items": items}
-            if args.skill == "to-spec":
-                draft_data["review_note"] = REVIEW_NOTE
+            draft_data["review_note"] = (
+                LEGACY_REPLY_REVIEW_NOTE if args.skill == "to-spec" else TICKETS_REVIEW_NOTE
+            )
             result = render(draft_data)
         except json.JSONDecodeError as error:
             parser.exit(1, f"OpenCode draft is not valid JSON (line {error.lineno}, column {error.colno}).\n")
@@ -217,8 +218,8 @@ def main():
         except (KeyError, TypeError):
             parser.exit(1, "OpenCode draft does not match the required issue format.\n")
         print(result, end="")
-    elif args.command == "pending-spec":
-        comment_id = pending_spec(json.loads(args.comments.read_text()), args.approval)
+    elif args.command == "pending-draft":
+        comment_id = pending_draft(json.loads(args.comments.read_text()), args.approval)
         if comment_id is not None:
             print(comment_id)
     else:
