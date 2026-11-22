@@ -65,6 +65,22 @@ def gh(*args, data=None):
     return json.loads(output)
 
 
+def read_ticket_items(raw):
+    try:
+        draft = json.loads(raw)
+    except json.JSONDecodeError:
+        blocks = re.findall(
+            r"^[ \t]*```([^\n`]*)\n(.*?)^[ \t]*```[ \t]*$", raw, re.MULTILINE | re.DOTALL
+        )
+        candidates = [body for language, body in blocks if language.strip().casefold() in {"", "json"}]
+        if len(candidates) > 1:
+            raise ValueError("Expected a single JSON code block for the ticket draft")
+        if not candidates:
+            raise
+        draft = json.loads(candidates[0])
+    return draft["items"]
+
+
 def paginate(endpoint):
     return [item for page in gh("--paginate", "--slurp", endpoint) for item in page]
 
@@ -204,8 +220,7 @@ def main():
                 body = fenced[1] if fenced else raw
                 items = [{"title": args.title.strip(), "body": body.strip(), "blocked_by": []}]
             else:
-                fenced = re.fullmatch(r"```(?:json)?\n(.*)\n```", raw, flags=re.DOTALL)
-                items = json.loads(fenced[1] if fenced else raw)["items"]
+                items = read_ticket_items(raw)
             draft_data = {"skill": args.skill, "source": args.source, "items": items}
             draft_data["review_note"] = (
                 LEGACY_REPLY_REVIEW_NOTE if args.skill == "to-spec" else TICKETS_REVIEW_NOTE
