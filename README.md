@@ -135,6 +135,22 @@ The default `plan` run can read with `read`, `glob`, and `grep`, and may load th
 
 When the repository owner posts a comment starting with `/oc implement this issue` on an issue (not a pull request), the workflow switches to the `build` agent and allows file edits, except `.git/**`, `.github/workflows/**`, and `opencode.json`. The edited tree is exported as a patch limited to 90 KB. A separate `publish-implementation` job then commits it as `github-actions[bot]` to a fresh `opencode/issue-<number>-<run>-<attempt>` branch, opens a draft PR against the default branch, and comments the commit, PR, and Actions links on the issue. The agent never commits, pushes, or opens the PR itself.
 
+### PR command limit
+
+Each PR gets three agent attempts, shared by commands in the PR conversation
+and inline review threads. The workflow queues commands for the same PR and
+checks GitHub Actions history with `actions: read` before installing OpenCode
+or passing it the model key. A successful **Record admitted PR request** step
+spends one attempt. It counts even if the run later fails, times out, or is
+cancelled. A re-run that reaches this step spends another attempt.
+
+Once the budget is spent, the reply job posts `limit_exhausted` in the
+request's thread with the current PR head SHA, an Actions log link, and a
+request for human intervention. If Actions history cannot be read, the
+workflow stops before calling the model. The budget depends on retained
+workflow history. Automatic PR reviews and issue commands have their own
+triggers outside this budget.
+
 ### Draft and publish issues
 
 - `/oc skill to-spec` drafts a specification from the issue and its discussion.
@@ -172,13 +188,53 @@ one issue at a time.
 See the [triage comment on issue #27](https://github.com/aputintsev/ai-for-developers-project-387/issues/27#issuecomment-7080215278)
 and its [Actions run](https://github.com/aputintsev/ai-for-developers-project-387/actions/runs/45030331803).
 
+### Independent pull request review
+
+[OpenCode PR Review](.github/workflows/opencode-review.yml) starts when a pull
+request is opened, updated with new commits, or reopened, including draft PRs.
+It runs independently of the comment-driven workflow. Each PR has its own
+concurrency group, and a new run cancels the previous run for that PR.
+
+The head branch must belong to this repository. Human authors must have
+`write`, `maintain`, or `admin` access and be associated with the repo as
+`OWNER`, `MEMBER`, or `COLLABORATOR`. Drafts opened by `github-actions[bot]`
+on `opencode/issue-*` branches are also eligible. Fork PRs are skipped.
+
+The review job has eight minutes and read access to repository contents,
+issues, PRs, Actions, checks, and commit statuses. It passes the diff, the PR
+discussion, linked issues and their comments, and a snapshot of CI to a fresh
+OpenCode CLI session using `OPENCODE_API_KEY`. The rubric comes from
+[REVIEW.md](REVIEW.md) on the PR's base revision. The first PR introducing that
+file can supply the proposed rubric from its head revision. CI can still be
+pending when the review runs. The Quality workflow checks pushes to branches
+in this repository and skips its PR job for those branches. A branch push by
+`GITHUB_TOKEN` does not start that push run.
+
+OpenCode runs in an isolated directory with its tools disabled. A separate
+two-minute job with `pull-requests: write` checks that the PR is still open
+at the reviewed SHA, then posts a conversation comment with that SHA and a
+link to the run. A maintainer decides how to act on findings and whether
+to merge.
+
+Use the [PR template](.github/pull_request_template.md) to record the source
+issue, specification and approval, checks for the exact head SHA, the risk to
+users, and how to revert and verify recovery. The implementation workflow
+includes the template in the draft description alongside the issue it closes.
+
+For PRs created or updated using `GITHUB_TOKEN`, check the PR for
+**Approve workflows to run**. A maintainer with write access can start the
+pending workflows. The repository's Actions settings must allow Actions to
+create pull requests for the implementation workflow to open a draft.
+GitHub App installation tokens can trigger PR workflows without that
+confirmation. [GitHub workflow trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)
+
 ### Model and authorization
 
 The agent runs OpenCode CLI v2.3.2 with `opencode-console/deepseek-v4.1-flash` — DeepSeek V4.1 Flash through OpenCode Console — using the `OPENCODE_API_KEY` Actions secret, and the job fails if the secret is empty.
 
 Unlike a standard GitHub App installation, the workflow does not create a separate bot identity or installation token. OpenCode CLI acts through the built-in `GITHUB_TOKEN`, which is `github-actions[bot]`, and the workflow sets `permissions: {}` at the top level so each job receives only its explicit grant:
 
-- `analyze`: read `contents`, `issues`, and `pull-requests`.
+- `analyze`: read `contents`, `issues`, `pull-requests`, and `actions`.
 - `reply`: write `issues` and `pull-requests`.
 - `publish-implementation`: write `contents`, `issues`, and `pull-requests`.
 - `publish-issue-draft`: read `contents` and write `issues`.
