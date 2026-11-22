@@ -65,6 +65,7 @@ jobs:
       patch: ${{ steps.opencode.outputs.patch }}
       pr-head: ${{ steps.discussion.outputs.pr-head }}
       pr-branch: ${{ steps.discussion.outputs.pr-branch }}
+      apply-failure: ${{ steps.pr-checkout.outputs.failure || steps.opencode.outputs.failure }}
       spec-links: ${{ steps.implementation.outputs.links }}
       approved-draft: ${{ steps.discussion.outputs.publish || steps.opencode.outputs.approved_draft }}
       limit-exhausted: ${{ steps.budget.outputs.exhausted }}
@@ -133,16 +134,15 @@ jobs:
             fi
             printf 'pr=true\n' >> "$GITHUB_OUTPUT"
             jq '{title, body}' "$RUNNER_TEMP/opencode-pr.json" > "$RUNNER_TEMP/opencode-thread.json"
-            apply_pattern='^apply([[:space:]]|$)'
-            if [[ $command =~ $apply_pattern ]]; then
+            if jq -e '.body | test("^apply([[:space:]]|$)"; "i")' "$RUNNER_TEMP/opencode-request.json" >/dev/null; then
               error=''
               if [[ $OWNER_COMMENT != true ]]; then
                 error='Only the repository owner can approve PR edits with /oc apply.'
               elif ! jq -e '.state == "open"' "$RUNNER_TEMP/opencode-pr.json" >/dev/null; then
                 error='OpenCode can apply edits only to an open PR.'
-              elif ! jq -e '.comment.body | test("^/(oc|opencode)[[:space:]]+apply([[:space:]]|$)")' "$GITHUB_EVENT_PATH" >/dev/null; then
+              elif ! jq -e '.comment.body | test("^/(oc|opencode)[[:space:]]+apply([[:space:]]|$)"; "i")' "$GITHUB_EVENT_PATH" >/dev/null; then
                 error='Start a new comment with /oc apply to approve PR edits.'
-              elif ! jq -e '.in_reply_to_id or (.body | test("^apply[[:space:]]+\\S"))' "$RUNNER_TEMP/opencode-request.json" >/dev/null; then
+              elif ! jq -e '.in_reply_to_id or (.body | test("^apply[[:space:]]+\\S"; "i"))' "$RUNNER_TEMP/opencode-request.json" >/dev/null; then
                 error='Add the approved changes after /oc apply, or post /oc apply as a reply in a review thread.'
               fi
               if [[ -n $error ]]; then
@@ -224,6 +224,7 @@ jobs:
           persist-credentials: false
           ref: ${{ github.event_name == 'issue_comment' && github.sha || github.event.repository.default_branch }}
       - name: Check out approved PR revision
+        id: pr-checkout
         if: steps.discussion.outputs.pr-head != '' && steps.admission.outcome == 'success'
         env:
           PR_HEAD: ${{ steps.discussion.outputs.pr-head }}
@@ -231,7 +232,9 @@ jobs:
           [[ $PR_HEAD =~ ^[0-9a-f]{40}$ ]]
           # OpenCode discovers project configuration and plugins from these paths.
           if ! git diff --quiet HEAD "$PR_HEAD" -- .opencode .claude .agents opencode.json opencode.jsonc; then
-            printf '%s\n' 'The PR must use the OpenCode project configuration from the default branch.' >&2
+            reason='The PR must use the OpenCode project configuration from the default branch.'
+            printf 'failure=%s\n' "$reason" >> "$GITHUB_OUTPUT"
+            printf '%s\n' "$reason" >&2
             exit 1
           fi
           git switch --detach "$PR_HEAD"
@@ -462,12 +465,18 @@ jobs:
             encoded_reply=$(head -c 24000 "$reply" | base64 -w 0)
           fi
           if [[ $IMPLEMENT == true ]]; then
+            reject_patch() {
+              printf 'failure=%s\n' "$1" >> "$GITHUB_OUTPUT"
+              printf '%s\n' "$1" >&2
+              exit 1
+            }
             rm opencode.json
             git add --all
-            git diff --cached --check
+            git diff --cached --check || reject_patch 'The proposed patch has whitespace errors or conflict markers.'
             if [[ -n $PR_HEAD ]]; then
-              git diff --cached --exit-code -- .github/workflows .opencode .claude .agents opencode.json opencode.jsonc \
-                call-calendar/api/openapi.yaml call-calendar/src/api/generated >/dev/null
+              git diff --cached --quiet -- .github/workflows .opencode .claude .agents opencode.json opencode.jsonc \
+                call-calendar/api/openapi.yaml call-calendar/src/api/generated ||
+                reject_patch 'The proposed patch changes protected files.'
             fi
             git diff --cached --binary > "$RUNNER_TEMP/opencode.patch"
             if [[ -n $PR_HEAD ]] && ! test -s "$RUNNER_TEMP/opencode.patch"; then
@@ -475,7 +484,8 @@ jobs:
               exit 0
             fi
             test -s "$RUNNER_TEMP/opencode.patch"
-            test "$(wc -c < "$RUNNER_TEMP/opencode.patch")" -le 90000
+            test "$(wc -c < "$RUNNER_TEMP/opencode.patch")" -le 90000 ||
+              reject_patch 'The proposed patch exceeds 90 KB.'
             printf 'patch=%s\n' "$(base64 -w 0 "$RUNNER_TEMP/opencode.patch")" >> "$GITHUB_OUTPUT"
           fi
           printf 'reply=%s\n' "$encoded_reply" >> "$GITHUB_OUTPUT"
@@ -483,8 +493,11 @@ jobs:
   reply:
     needs: analyze
     if: >-
-      needs.analyze.outputs.limit-exhausted == 'true' ||
-      ((needs.analyze.outputs.request-reply != '' || needs.analyze.outputs.reply != '') && needs.analyze.outputs.patch == '')
+      !cancelled() &&
+      ((needs.analyze.result == 'failure' && needs.analyze.outputs.pr-head != '') ||
+       (needs.analyze.result == 'success' &&
+        (needs.analyze.outputs.limit-exhausted == 'true' ||
+         ((needs.analyze.outputs.request-reply != '' || needs.analyze.outputs.reply != '') && needs.analyze.outputs.patch == ''))))
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions:
@@ -498,6 +511,8 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
           REPLY: ${{ needs.analyze.outputs.request-reply || needs.analyze.outputs.reply }}
           LIMIT_EXHAUSTED: ${{ needs.analyze.outputs.limit-exhausted }}
+          ANALYZE_FAILED: ${{ needs.analyze.result == 'failure' }}
+          ANALYZE_FAILURE: ${{ needs.analyze.outputs.apply-failure }}
         run: |
           endpoint="repos/$GH_REPO/issues/$ISSUE_NUMBER/comments"
           if test "$GITHUB_EVENT_NAME" = pull_request_review_comment; then
@@ -505,7 +520,11 @@ jobs:
             endpoint="repos/$GH_REPO/pulls/$ISSUE_NUMBER/comments/$comment_id/replies"
           fi
           {
-            if [[ $LIMIT_EXHAUSTED == true ]]; then
+            if [[ $ANALYZE_FAILED == true ]]; then
+              run_url="$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
+              printf '%s OpenCode stopped before publishing PR edits. [Review the Actions logs](%s).\n' \
+                "${ANALYZE_FAILURE:-OpenCode could not prepare the approved patch.}" "$run_url"
+            elif [[ $LIMIT_EXHAUSTED == true ]]; then
               sha=$(gh api "repos/$GH_REPO/pulls/$ISSUE_NUMBER" --jq .head.sha)
               run_url="$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
               printf 'OpenCode needs a human (limit_exhausted). This PR has used its %s agent attempts.\n\nCurrent head %s · [Actions logs](%s)\n' \
