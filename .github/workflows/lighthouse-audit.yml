@@ -151,8 +151,12 @@ jobs:
           jq -ecs --slurpfile context context.txt '
             def plain:
               gsub("[[:cntrl:]]"; " ") | gsub("&"; "&amp;") |
+              gsub("#"; "&#35;") |
               gsub("<"; "&lt;") | gsub(">"; "&gt;") |
-              gsub("@"; "&#64;") | gsub("\\["; "&#91;");
+              gsub("@"; "&#64;") | gsub("\\["; "&#91;") |
+              gsub("\\\\"; "&#92;") | gsub("`"; "&#96;") |
+              gsub("\\*"; "&#42;") | gsub("_"; "&#95;") |
+              gsub("~"; "&#126;");
             def text:
               type == "string" and length <= 1500 and test("\\S");
             if length != 1 then error("Expected one OpenCode response") else .[0] end |
@@ -173,9 +177,10 @@ jobs:
                 error("Unknown Lighthouse audit ID")) as $audit |
               if all($finding.problem, $finding.evidence, $finding.action; text) then
                 {summary: ($reply.summary | plain), existing_issue: null,
-                 finding: {audit_id: $audit.id, audit_title: $audit.title,
-                   score: $audit.score, measurement: $audit.displayValue,
-                   page: $report.finalDisplayedUrl,
+                 finding: {audit_id: $audit.id,
+                   audit_title: ($audit.title | gsub("[[:cntrl:]]"; " ") | gsub("@"; "＠")),
+                   score: $audit.score, measurement: ($audit.displayValue | if . == null then null else plain end),
+                   page: $report.finalDisplayedUrl, page_display: ($report.finalDisplayedUrl | plain),
                    problem: ($finding.problem | plain), evidence: ($finding.evidence | plain),
                    action: ($finding.action | plain)}}
               else error("Incomplete Lighthouse finding") end
@@ -230,7 +235,7 @@ jobs:
               title: ("[Lighthouse] " + .audit_title),
               body: ("## Проблема\n\n" + .problem +
                 "\n\n## Данные отчёта\n\n" + .evidence +
-                "\n\n- Приложение Call Calendar\n- Страница " + .page +
+                "\n\n- Приложение Call Calendar\n- Страница " + .page_display +
                 "\n- Lighthouse `" + .audit_id + "`, оценка " + (.score | tostring) +
                 (if .measurement then " (" + .measurement + ")" else "" end) +
                 "\n- [Прогон и артефакт lighthouse-report](" + $run_url + ")" +
