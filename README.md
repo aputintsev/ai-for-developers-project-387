@@ -138,6 +138,8 @@ When the repository owner posts a comment starting with `/oc implement this issu
 ### Draft and publish issues
 
 - `/oc skill to-spec` drafts a specification from the issue and its discussion.
+  The owner can approve the latest draft for publication by replying in their
+  own words in the same discussion.
 - `/oc skill to-tickets` drafts tickets from the current issue.
   Use `/oc skill to-tickets #42` to draft them from issue #42 in this repository.
 - `/oc skill publish <comment ID>` publishes a reviewed draft. The owner posts
