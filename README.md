@@ -121,7 +121,7 @@ Render MCP позволяет проверять состояние сервис
 
 ## OpenCode in GitHub
 
-The `.github/workflows/opencode.yml` workflow answers maintainer requests in the discussion where they are posted and, for an issue implementation, turns the result into a draft pull request. It uses the issue or pull request title, body, comments, and inline review comments as context, and follows the GitHub Issues conventions in `docs/agents/issue-tracker.md`.
+The `.github/workflows/opencode.yml` workflow answers maintainer requests, opens draft pull requests for issue implementations, and applies owner-approved edits to existing PRs. It uses the issue or pull request title, body, comments, and inline review comments as context, and follows the GitHub Issues conventions in `docs/agents/issue-tracker.md`.
 
 ### Triggers and commands
 
@@ -134,6 +134,20 @@ Only comments from human users are considered: bots are ignored, the author must
 The default `plan` run can read with `read`, `glob`, and `grep`, and may load the `to-spec` and `to-tickets` skills from `.agents/skills/`. It cannot edit files or run commands. Its answer is posted in the original thread: an issue or PR conversation comment becomes a new issue comment, and an inline review comment becomes a reply in that review thread.
 
 When the repository owner posts a comment starting with `/oc implement this issue` on an issue (not a pull request), the workflow switches to the `build` agent and allows file edits, except `.git/**`, `.github/workflows/**`, and `opencode.json`. The edited tree is exported as a patch limited to 90 KB. A separate `publish-implementation` job then commits it as `github-actions[bot]` to a fresh `opencode/issue-<number>-<run>-<attempt>` branch, opens a draft PR against the default branch, and comments the commit, PR, and Actions links on the issue. The agent never commits, pushes, or opens the PR itself.
+
+### Apply approved edits to a pull request
+
+The repository owner approves edits by starting a new comment on an open PR
+with `/oc apply <what to change>`. You can name several review comments in one
+command, for example `/oc apply Fix both remarks from my review above.` To
+approve a specific inline review thread, reply in that thread with `/oc apply`.
+The `/opencode apply` alias works in both places.
+
+OpenCode runs in `build` mode on the current PR head. The PR must come from a
+branch in this repository and use the trusted OpenCode project configuration.
+After `mise run check` passes, a separate job commits and pushes to the same
+head branch and posts the commit and run in the PR conversation. If the PR
+head moves during the run, review the new revision before approving again.
 
 ### Implement an approved specification
 
@@ -269,6 +283,8 @@ Unlike a standard GitHub App installation, the workflow does not create a separa
 
 - `analyze`: read `contents`, `issues`, `pull-requests`, and `actions`.
 - `reply`: write `issues` and `pull-requests`.
+- `verify-implementation`: read `contents`.
+- `publish-pr-edits`: write `contents` and `pull-requests`.
 - `publish-implementation`: write `contents`, `issues`, and `pull-requests`.
 - `publish-issue-draft`: read `contents` and write `issues`.
 
