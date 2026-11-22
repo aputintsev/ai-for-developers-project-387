@@ -154,6 +154,24 @@ Tickets are linked to the source issue as sub-issues and use GitHub's
 `blocked by` relationships. The workflow posts the links in the discussion.
 Repeat the same publish command to resume an interrupted publication.
 
+### Automatic issue triage
+
+The [automatic triage workflow](.github/workflows/opencode-triage.yml) runs on
+`issues: opened`. It considers issues opened by a human `OWNER` or
+`COLLABORATOR` with `admin`, `maintain`, or `write` access. After queueing,
+it checks that the issue is still open and eligible under the
+[issue tracker label rules](docs/agents/issue-tracker.md#autotriage-label-rules).
+
+An explicit prompt asks OpenCode to review the new issue against the repository
+and suggest a concrete fix, point to documentation, or ask a specific question.
+The analysis job has read-only repository and issue permissions and a
+five-minute timeout. A separate job with `issues: write` posts a comment when
+the model has something useful to add. The workflow queues runs and handles
+one issue at a time.
+
+See the [triage comment on issue #27](https://github.com/aputintsev/ai-for-developers-project-387/issues/27#issuecomment-7080215278)
+and its [Actions run](https://github.com/aputintsev/ai-for-developers-project-387/actions/runs/45030331803).
+
 ### Model and authorization
 
 The agent runs OpenCode CLI v2.3.2 with `opencode-console/deepseek-v4.1-flash` — DeepSeek V4.1 Flash through OpenCode Console — using the `OPENCODE_API_KEY` Actions secret, and the job fails if the secret is empty.

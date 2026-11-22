@@ -20,6 +20,18 @@ Use `gh` inside this clone or pass `-R aputintsev/ai-for-developers-project-387`
 
 File issues only into the user's own repo. Never file into `mattpocock/skills` (the repo these skills come from) unless the user owns it. In a fork, `gh` can default to the upstream parent, so before the first `gh issue create` of a session, check the target with `gh repo view --json nameWithOwner` and confirm it with the user if it is not their repo.
 
+## Autotriage label rules
+
+- Open incoming requests without `ready-for-agent` so eligible issues can receive
+  an initial assessment on creation.
+- Apply `ready-for-agent` when creating an approved specification or a ticket
+  prepared by `to-spec` or `to-tickets`. When publishing directly, pass
+  `--label ready-for-agent` to `gh issue create`. The OpenCode publisher applies
+  this label and adds an `opencode-published` marker in the issue body.
+- The [autotriage workflow](../../.github/workflows/opencode-triage.yml) skips
+  issues with `ready-for-agent` or the `opencode-published` marker. Its eligibility
+  check also excludes issues with a `wayfinder:*` label.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature requests; `/triage` reads this flag.)_
