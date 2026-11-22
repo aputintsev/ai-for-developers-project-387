@@ -131,9 +131,29 @@ Only comments from human users are considered: bots are ignored, the author must
 
 ### What the agent can do
 
-The default `plan` run can read with `read`, `glob`, and `grep`, and may load the `to-spec`, `to-tickets`, and `implement-spec` skills from `.agents/skills/`. It cannot edit files or run commands. Its answer is posted in the original thread: an issue or PR conversation comment becomes a new issue comment, and an inline review comment becomes a reply in that review thread.
+The default `plan` run can read with `read`, `glob`, and `grep`, and may load the `to-spec` and `to-tickets` skills from `.agents/skills/`. It cannot edit files or run commands. Its answer is posted in the original thread: an issue or PR conversation comment becomes a new issue comment, and an inline review comment becomes a reply in that review thread.
 
 When the repository owner posts a comment starting with `/oc implement this issue` on an issue (not a pull request), the workflow switches to the `build` agent and allows file edits, except `.git/**`, `.github/workflows/**`, and `opencode.json`. The edited tree is exported as a patch limited to 90 KB. A separate `publish-implementation` job then commits it as `github-actions[bot]` to a fresh `opencode/issue-<number>-<run>-<attempt>` branch, opens a draft PR against the default branch, and comments the commit, PR, and Actions links on the issue. The agent never commits, pushes, or opens the PR itself.
+
+### Implement an approved specification
+
+The repository owner posts `/oc skill implement-spec #SPEC #TICKET [#TICKET ...]`
+in the source issue. Use the published specification and its approved tickets.
+For the existing requests, use these commands after the workflow lands on the
+default branch.
+
+| Source issue | Command |
+| --- | --- |
+| #14 | `/oc skill implement-spec #21 #23 #24 #25` |
+| #27 | `/oc skill implement-spec #29 #31 #32` |
+
+The workflow reads open issues with the `ready-for-agent` label, checks ticket
+links and dependencies, then invokes `@implement-spec` in OpenCode's
+`build` agent. It uses one working tree and processes tickets in dependency
+order. A separate job checks the acceptance-test changes, regenerates API
+artifacts and runs `mise run check`. After the checks pass, the publish job
+opens one draft PR with the source, specification, closing references, link to
+the owner's command, checks, risk and rollback.
 
 ### PR command limit
 

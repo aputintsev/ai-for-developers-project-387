@@ -194,6 +194,50 @@ def publish(repo, thread, comment_id):
     print(summary)
 
 
+def implementation_context(repo, event, spec_number, ticket_numbers):
+    root = f"repos/{repo}"
+    source = event["issue"]["number"]
+    numbers = [source, spec_number, *ticket_numbers]
+    if len(set(numbers)) != len(numbers):
+        raise ValueError("Source, specification, and tickets must be distinct issues")
+
+    def open_issue(number):
+        issue = gh(f"{root}/issues/{number}")
+        if "pull_request" in issue or issue["state"] != "open":
+            raise ValueError(f"#{number} must be an open issue")
+        if number != source and LABEL not in {label["name"] for label in issue["labels"]}:
+            raise ValueError(f"#{number} must have the {LABEL} label")
+        return {key: issue[key] for key in ("number", "title", "body", "html_url")}
+
+    original = open_issue(source)
+    spec = open_issue(spec_number)
+    linked = {
+        issue["number"]
+        for parent in (source, spec_number)
+        for issue in paginate(f"{root}/issues/{parent}/sub_issues?per_page=100")
+    }
+    tickets = []
+    for number in ticket_numbers:
+        if number not in linked:
+            raise ValueError(f"#{number} must be a sub-issue of #{source} or #{spec_number}")
+        ticket = open_issue(number)
+        blockers = [
+            item["number"]
+            for item in paginate(f"{root}/issues/{number}/dependencies/blocked_by?per_page=100")
+            if item["state"] == "open"
+        ]
+        if set(blockers) - set(ticket_numbers):
+            raise ValueError(f"Include the unresolved blockers of #{number} in the command")
+        ticket["blocked_by"] = blockers
+        tickets.append(ticket)
+    return {
+        "source": original,
+        "specification": spec,
+        "tickets": tickets,
+        "owner_approval": event["comment"]["html_url"],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -209,6 +253,11 @@ def main():
     apply.add_argument("repo")
     apply.add_argument("thread", type=int)
     apply.add_argument("comment_id", type=int)
+    implementation = commands.add_parser("implementation-context")
+    implementation.add_argument("repo")
+    implementation.add_argument("event", type=Path)
+    implementation.add_argument("spec", type=int)
+    implementation.add_argument("tickets", nargs="+", type=int)
     args = parser.parse_args()
     if args.command == "draft":
         raw = args.output.read_text().strip()
@@ -237,6 +286,13 @@ def main():
         comment_id = pending_draft(json.loads(args.comments.read_text()), args.approval)
         if comment_id is not None:
             print(comment_id)
+    elif args.command == "implementation-context":
+        try:
+            print(json.dumps(implementation_context(
+                args.repo, json.loads(args.event.read_text()), args.spec, args.tickets
+            ), ensure_ascii=False))
+        except ValueError as error:
+            parser.exit(1, f"{error}\n")
     else:
         publish(args.repo, args.thread, args.comment_id)
 
