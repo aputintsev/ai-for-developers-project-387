@@ -1,4 +1,8 @@
 name: OpenCode
+run-name: >-
+  ${{ (github.event.pull_request.number || github.event.issue.pull_request) &&
+      format('OpenCode PR #{0}', github.event.pull_request.number || github.event.issue.number) ||
+      format('OpenCode issue #{0}', github.event.issue.number) }}
 
 on:
   # Required for issue commands. Only authorized commenters can start analysis.
@@ -10,6 +14,9 @@ on:
     types: [created]
 
 permissions: {}
+
+env:
+  OPENCODE_PR_RUN_LIMIT: '3'
 
 defaults:
   run:
@@ -28,6 +35,7 @@ concurrency:
        startsWith(github.event.comment.body, '/opencode'))) &&
       format('thread-{0}', github.event.issue.number || github.event.pull_request.number) ||
       format('run-{0}', github.run_id) }}
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -50,10 +58,12 @@ jobs:
       contents: read
       issues: read
       pull-requests: read
+      actions: read
     outputs:
       reply: ${{ steps.opencode.outputs.reply }}
       patch: ${{ steps.opencode.outputs.patch }}
       approved-draft: ${{ steps.discussion.outputs.publish || steps.opencode.outputs.approved_draft }}
+      limit-exhausted: ${{ steps.budget.outputs.exhausted }}
     steps:
       - name: Verify commenter has write access
         env:
@@ -108,6 +118,7 @@ jobs:
             if ! jq -e --arg repo "$GH_REPO" '.head.repo.full_name == $repo' "$RUNNER_TEMP/opencode-pr.json" >/dev/null; then
               exit 0
             fi
+            printf 'pr=true\n' >> "$GITHUB_OUTPUT"
             jq '{title, body}' "$RUNNER_TEMP/opencode-pr.json" > "$RUNNER_TEMP/opencode-thread.json"
           else
             gh api "$endpoint/issues/$THREAD_NUMBER" --jq '{title, body}' > "$RUNNER_TEMP/opencode-thread.json"
@@ -142,8 +153,40 @@ jobs:
             printf 'skill=%s\nsource=%s\n' "$skill" "$source" >> "$GITHUB_OUTPUT"
           fi
           printf 'allowed=true\n' >> "$GITHUB_OUTPUT"
+      - name: Check PR agent budget
+        id: budget
+        if: steps.discussion.outputs.allowed == 'true' && steps.discussion.outputs.pr == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: |
+          endpoint="repos/$GH_REPO/actions"
+          run_ids=$(gh api --paginate --slurp "$endpoint/workflows/opencode.yml/runs?per_page=100" |
+            jq -er --arg title "OpenCode PR #$PR_NUMBER" --arg current "$GITHUB_RUN_ID" '
+              [.[].workflow_runs[] | select(.display_title == $title) | .id | tostring] | unique |
+              if index($current) == null then error("Current PR run is missing from Actions history") else .[] end
+            ')
+          used=0
+          while IFS= read -r run_id; do
+            # GitHub retains the jobs of earlier attempts when a run is retried.
+            admitted=$(gh api --paginate --slurp "$endpoint/runs/$run_id/jobs?filter=all&per_page=100" |
+              jq -er '[.[].jobs[] | .steps[]? | select(.name == "Record admitted PR request" and .conclusion == "success")] | length')
+            used=$((used + admitted))
+            if (( used >= OPENCODE_PR_RUN_LIMIT )); then
+              printf 'exhausted=true\n' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          done <<< "$run_ids"
+          printf 'available=true\n' >> "$GITHUB_OUTPUT"
+      - name: Record admitted PR request
+        id: admission
+        if: steps.budget.outputs.available == 'true'
+        run: printf '%s\n' 'PR agent attempt admitted.'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        if: steps.discussion.outputs.allowed == 'true'
+        if: >-
+          steps.discussion.outputs.allowed == 'true' &&
+          (steps.discussion.outputs.pr != 'true' || steps.admission.outcome == 'success')
         with:
           persist-credentials: false
           ref: ${{ github.event_name == 'issue_comment' && github.sha || github.event.repository.default_branch }}
@@ -161,7 +204,11 @@ jobs:
             "$RUNNER_TEMP/opencode-comments.json" "$approval_id")
           printf 'candidate=%s\n' "$candidate" >> "$GITHUB_OUTPUT"
       - name: Install OpenCode
-        if: steps.discussion.outputs.allowed == 'true' && (steps.discussion.outputs.command == 'true' || steps.pending.outputs.candidate != '')
+        id: install
+        if: >-
+          steps.discussion.outputs.allowed == 'true' &&
+          (steps.discussion.outputs.pr != 'true' || steps.admission.outcome == 'success') &&
+          (steps.discussion.outputs.command == 'true' || steps.pending.outputs.candidate != '')
         run: |
           archive="$RUNNER_TEMP/opencode.tar.gz"
           curl --fail --silent --show-error --location --proto '=https' \
@@ -173,7 +220,7 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP/opencode-bin"
       - name: Answer comment
         id: opencode
-        if: steps.discussion.outputs.allowed == 'true' && (steps.discussion.outputs.command == 'true' || steps.pending.outputs.candidate != '')
+        if: steps.install.outcome == 'success'
         env:
           OPENCODE_API_KEY: ${{ secrets.OPENCODE_API_KEY }}
           DRAFT_SKILL: ${{ steps.discussion.outputs.skill }}
@@ -332,7 +379,9 @@ jobs:
 
   reply:
     needs: analyze
-    if: needs.analyze.outputs.reply != '' && needs.analyze.outputs.patch == ''
+    if: >-
+      needs.analyze.outputs.limit-exhausted == 'true' ||
+      (needs.analyze.outputs.reply != '' && needs.analyze.outputs.patch == '')
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     permissions:
@@ -345,14 +394,24 @@ jobs:
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ github.event.issue.number || github.event.pull_request.number }}
           REPLY: ${{ needs.analyze.outputs.reply }}
+          LIMIT_EXHAUSTED: ${{ needs.analyze.outputs.limit-exhausted }}
         run: |
-          test -n "$REPLY"
           endpoint="repos/$GH_REPO/issues/$ISSUE_NUMBER/comments"
           if test "$GITHUB_EVENT_NAME" = pull_request_review_comment; then
             comment_id=$(jq -r '.comment.in_reply_to_id // .comment.id' "$GITHUB_EVENT_PATH")
             endpoint="repos/$GH_REPO/pulls/$ISSUE_NUMBER/comments/$comment_id/replies"
           fi
-          printf '%s' "$REPLY" | base64 --decode | jq -Rs '{body: .}' |
+          {
+            if [[ $LIMIT_EXHAUSTED == true ]]; then
+              sha=$(gh api "repos/$GH_REPO/pulls/$ISSUE_NUMBER" --jq .head.sha)
+              run_url="$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT"
+              printf 'OpenCode needs a human (limit_exhausted). This PR has used its %s agent attempts.\n\nCurrent head %s · [Actions logs](%s)\n' \
+                "$OPENCODE_PR_RUN_LIMIT" "$sha" "$run_url"
+            else
+              test -n "$REPLY"
+              printf '%s' "$REPLY" | base64 --decode
+            fi
+          } | jq -Rs '{body: .}' |
             gh api "$endpoint" --input - --jq .html_url
 
   publish-implementation:
@@ -383,11 +442,16 @@ jobs:
           git diff --cached --quiet -- .github/workflows
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
             commit -m "feat: implement issue #$ISSUE_NUMBER with OpenCode (#$ISSUE_NUMBER)"
+          body="$RUNNER_TEMP/opencode-pr-body.md"
+          {
+            printf 'Closes #%s\n\n' "$ISSUE_NUMBER"
+            git show "$GITHUB_SHA:.github/pull_request_template.md"
+          } > "$body"
           branch="opencode/issue-$ISSUE_NUMBER-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           gh auth setup-git
           git push origin "HEAD:refs/heads/$branch"
           pr=$(gh pr create --repo "$GH_REPO" --base "$BASE_BRANCH" --head "$branch" --draft \
-            --title "OpenCode implementation for issue #$ISSUE_NUMBER" --body "Closes #$ISSUE_NUMBER")
+            --title "OpenCode implementation for issue #$ISSUE_NUMBER" --body-file "$body")
           run_url="$GITHUB_SERVER_URL/$GH_REPO/actions/runs/$GITHUB_RUN_ID"
           commit_url="$GITHUB_SERVER_URL/$GH_REPO/commit/$(git rev-parse HEAD)"
           gh issue comment "$ISSUE_NUMBER" --repo "$GH_REPO" \
