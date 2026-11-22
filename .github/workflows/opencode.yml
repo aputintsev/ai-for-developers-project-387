@@ -196,20 +196,29 @@ jobs:
               'Return only a JSON object with an items array. Each item has title and body strings and blocked_by, an array of 1-based indices of earlier items in dependency order. For to-spec return one item with no blockers and include proposed testing boundaries.' \
               'Use Markdown for each body. Do not include HTML comments. Keep the combined text under 8000 characters.')
           fi
-          "$RUNNER_TEMP/opencode-bin/opencode" --standalone run \
-            --agent "$agent" --model opencode-console/deepseek-v4.1-flash \
-            --file "$RUNNER_TEMP/opencode-context.txt" -- "$prompt" > "$reply"
-          if ! test -s "$reply"; then
-            printf '%s\n' 'OpenCode did not return an answer.' >&2
-            exit 1
-          fi
+          run_opencode() {
+            "$RUNNER_TEMP/opencode-bin/opencode" --standalone run \
+              --agent "$agent" --model opencode-console/deepseek-v4.1-flash \
+              --file "$RUNNER_TEMP/opencode-context.txt" -- "$1" > "$reply"
+          }
+          run_opencode "$prompt"
           if test -n "$DRAFT_SKILL"; then
-            python3 .github/scripts/opencode-issues.py draft "$DRAFT_SKILL" "$DRAFT_SOURCE" "$reply" > "$RUNNER_TEMP/opencode-draft.md"
-            mv "$RUNNER_TEMP/opencode-draft.md" "$reply"
+            draft="$RUNNER_TEMP/opencode-draft.md"
+            if ! python3 .github/scripts/opencode-issues.py draft "$DRAFT_SKILL" "$DRAFT_SOURCE" "$reply" > "$draft"; then
+              printf '%s\n' 'Retrying OpenCode draft generation once.' >&2
+              run_opencode "$prompt"$'\nStart your final response with { and end with }. Omit code fences and introductory text. Keep the combined body text under 4000 characters.'
+              python3 .github/scripts/opencode-issues.py draft "$DRAFT_SKILL" "$DRAFT_SOURCE" "$reply" > "$draft"
+            fi
+            encoded_reply=$(base64 -w 0 < "$draft")
           else
+            if ! test -s "$reply"; then
+              printf '%s\n' 'OpenCode did not return an answer.' >&2
+              exit 1
+            fi
             sed -i '/^<!-- opencode-issue-draft /d' "$reply"
+            encoded_reply=$(head -c 24000 "$reply" | base64 -w 0)
           fi
-          printf 'reply=%s\n' "$(head -c 24000 "$reply" | base64 -w 0)" >> "$GITHUB_OUTPUT"
+          printf 'reply=%s\n' "$encoded_reply" >> "$GITHUB_OUTPUT"
           if [[ $IMPLEMENT == true ]]; then
             rm opencode.json
             git add --all

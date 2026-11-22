@@ -10,6 +10,7 @@ import subprocess
 
 DRAFT_PREFIX = "<!-- opencode-issue-draft "
 LABEL = "ready-for-agent"
+MAX_DRAFT_BYTES = 60_000
 
 
 def validate(draft):
@@ -43,8 +44,8 @@ def render(draft):
     lines.extend(["", "After review, the owner can publish this exact draft with `/oc skill publish <comment ID>`.",
                   "", f"{DRAFT_PREFIX}{encoded} -->"])
     result = "\n".join(lines) + "\n"
-    if len(result.encode()) > 24000:
-        raise ValueError("Draft exceeds the GitHub reply size used by this workflow")
+    if len(result.encode()) > MAX_DRAFT_BYTES:
+        raise ValueError(f"Draft exceeds the {MAX_DRAFT_BYTES}-byte reply limit")
     return result
 
 
@@ -160,8 +161,17 @@ def main():
     if args.command == "draft":
         raw = args.output.read_text().strip()
         fenced = re.fullmatch(r"```(?:json)?\n(.*)\n```", raw, flags=re.DOTALL)
-        response = json.loads(fenced[1] if fenced else raw)
-        print(render({"skill": args.skill, "source": args.source, "items": response["items"]}), end="")
+        try:
+            response = json.loads(fenced[1] if fenced else raw)
+        except json.JSONDecodeError as error:
+            parser.exit(1, f"OpenCode draft is not valid JSON (line {error.lineno}, column {error.colno}).\n")
+        try:
+            result = render({"skill": args.skill, "source": args.source, "items": response["items"]})
+        except ValueError as error:
+            parser.exit(1, f"Invalid OpenCode draft: {error}.\n")
+        except (KeyError, TypeError):
+            parser.exit(1, "OpenCode draft does not match the required issue format.\n")
+        print(result, end="")
     else:
         publish(args.repo, args.thread, args.comment_id)
 
