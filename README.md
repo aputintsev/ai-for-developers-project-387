@@ -143,7 +143,8 @@ and loads its open tickets. You can add a description after ` - `, for example
 `/oc skill implement-spec - implement the specification and prepare a PR`.
 If multiple open specifications are published in the same discussion, use
 `/oc skill implement-spec #SPEC` to choose one. Add ticket numbers after the
-specification number to select a subset.
+specification number to select a subset. A colon before the numbers is optional.
+Use either a list of issue numbers or an explanation without issue references.
 
 Explicit commands for the existing requests:
 

@@ -105,22 +105,12 @@ jobs:
               exit 0
             fi
             printf 'command=true\n' >> "$GITHUB_OUTPUT"
-            spec_pattern='^skill implement-spec( #[1-9][0-9]*)+$'
-            auto_spec_pattern='^skill implement-spec([[:space:]]+(-|—)[[:space:]]+.*|:[[:space:]]+.*)?$'
             if [[ $command == 'skill implement-spec'* ]]; then
               if [[ $OWNER_ISSUE_COMMENT != true ]]; then
                 printf '%s\n' 'Run /oc skill implement-spec as the repository owner in the source issue.' >&2
                 exit 1
               fi
-              if [[ $command =~ $spec_pattern ]]; then
-                references="${command#skill implement-spec }"
-              elif [[ $command =~ $auto_spec_pattern ]]; then
-                references=''
-              else
-                printf '%s\n' 'Use /oc skill implement-spec or /oc skill implement-spec #SPEC [#TICKET ...].' >&2
-                exit 1
-              fi
-              printf 'implement=true\nimplement-spec=true\nimplementation=%s\nallowed=true\n' "$references" >> "$GITHUB_OUTPUT"
+              printf 'implement=true\nimplement-spec=true\nallowed=true\n' >> "$GITHUB_OUTPUT"
               exit 0
             fi
             if [[ $OWNER_ISSUE_COMMENT == true && $command == 'implement this issue'* ]]; then
@@ -215,12 +205,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          REFERENCES: ${{ steps.discussion.outputs.implementation }}
         run: |
-          read -r -a numbers <<< "${REFERENCES//#/}"
           context="$RUNNER_TEMP/opencode-context.txt"
           python3 .github/scripts/opencode-issues.py implementation-context \
-            "$GH_REPO" "$GITHUB_EVENT_PATH" "${numbers[@]}" > "$context"
+            "$GH_REPO" "$GITHUB_EVENT_PATH" --request "$RUNNER_TEMP/opencode-request.json" > "$context"
           links=$(jq -r '
             "Source issue #\(.source.number)\nSpecification #\(.specification.number)\nOwner approval \(.owner_approval)\n\n" +
             ([(if .close_specification then .specification else empty end), .tickets[]] |

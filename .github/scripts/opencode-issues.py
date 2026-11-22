@@ -208,6 +208,23 @@ def parent_specification(body):
     return int(references.pop()) if len(references) == 1 else None
 
 
+def implementation_references(command):
+    prefix = re.fullmatch(r"skill implement-spec(.*)", command.strip(), flags=re.DOTALL)
+    if prefix:
+        suffix = prefix[1]
+        explicit = re.fullmatch(r"(?:\s+|:\s*)(#[1-9][0-9]*(?:\s+#[1-9][0-9]*)*)", suffix)
+        if explicit:
+            spec, *tickets = (int(reference[1:]) for reference in explicit[1].split())
+            return spec, tickets
+        explanation = re.fullmatch(r"(?:\s+[-—]|:)\s+\S.*", suffix, flags=re.DOTALL)
+        if not suffix or (explanation and not re.search(r"#[0-9]", suffix)):
+            return None, []
+    raise ValueError(
+        "Use /oc skill implement-spec with an optional explanation, or "
+        "/oc skill implement-spec #SPEC [#TICKET ...] with issue numbers only"
+    )
+
+
 def discover_specification(root, source):
     number = source["number"]
     comments = {
@@ -361,6 +378,7 @@ def main():
     implementation.add_argument("event", type=Path)
     implementation.add_argument("spec", nargs="?", type=int)
     implementation.add_argument("tickets", nargs="*", type=int)
+    implementation.add_argument("--request", type=Path)
     pr_body = commands.add_parser("implementation-pr-body")
     for name in ("template", "links", "summary"):
         pr_body.add_argument(name, type=Path)
@@ -396,8 +414,13 @@ def main():
             print(comment_id)
     elif args.command == "implementation-context":
         try:
+            spec, tickets = args.spec, args.tickets
+            if args.request is not None:
+                if spec is not None:
+                    raise ValueError("Use either --request or explicit issue numbers")
+                spec, tickets = implementation_references(json.loads(args.request.read_text())["body"])
             print(json.dumps(implementation_context(
-                args.repo, json.loads(args.event.read_text()), args.spec, args.tickets
+                args.repo, json.loads(args.event.read_text()), spec, tickets
             ), ensure_ascii=False))
         except ValueError as error:
             parser.exit(1, f"{error}\n")

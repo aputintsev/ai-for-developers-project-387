@@ -86,6 +86,45 @@ class ImplementationContextTests(unittest.TestCase):
         self.assertEqual([ticket["blocked_by"] for ticket in context["tickets"]], [[], [23]])
         self.assertEqual(context["owner_approval"], "approval-url")
 
+    def run_implementation_request(self, command):
+        with tempfile.TemporaryDirectory() as folder:
+            event = Path(folder) / "event.json"
+            event.write_text(json.dumps(self.event))
+            request = Path(folder) / "request.json"
+            request.write_text(json.dumps({"body": command}))
+            args = ["opencode-issues.py", "implementation-context", self.repo, str(event),
+                    "--request", str(request)]
+            stdout = io.StringIO()
+            with patch("sys.argv", args), contextlib.redirect_stdout(stdout):
+                issues.main()
+        return json.loads(stdout.getvalue())
+
+    def test_implementation_request_preserves_explicit_tickets(self):
+        for command in ("skill implement-spec #21 #23", "skill implement-spec: #21 #23"):
+            with self.subTest(command=command):
+                context = self.run_implementation_request(command)
+                self.assertEqual(context["specification"]["number"], 21)
+                self.assertEqual([ticket["number"] for ticket in context["tickets"]], [23])
+
+    def test_implementation_request_discovers_scope_for_short_command_or_explanation(self):
+        for command in ("skill implement-spec", "skill implement-spec - выполни спецификацию",
+                        "skill implement-spec: подготовь черновик PR", "skill implement-spec #21"):
+            with self.subTest(command=command):
+                context = self.run_implementation_request(command)
+                self.assertEqual(context["specification"]["number"], 21)
+                self.assertEqual([ticket["number"] for ticket in context["tickets"]], [23, 24])
+
+    def test_implementation_request_rejects_numbers_mixed_with_explanation(self):
+        for command in ("skill implement-spec: #21 #23 и подготовь PR",
+                        "skill implement-spec - выполни только #23", "skill implement-spec #21 #0"):
+            with self.subTest(command=command):
+                stderr = io.StringIO()
+                with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as error:
+                    self.run_implementation_request(command)
+                self.assertEqual(error.exception.code, 1)
+                self.assertIn("Use /oc skill implement-spec", stderr.getvalue())
+        self.mock_gh.assert_not_called()
+
     def test_rejects_duplicates_before_github_calls(self):
         with self.assertRaisesRegex(ValueError, "distinct"):
             self.load((23, 23))
