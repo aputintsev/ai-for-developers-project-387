@@ -14,12 +14,18 @@ function focusConflictMessage(element: HTMLParagraphElement | null) {
   element?.focus()
 }
 
-function BookingDetails({ meetingType, slot }: { meetingType: MeetingType; slot: Slot }) {
+function BookingDetails({ meetingType, slot, topic }: { meetingType: MeetingType; slot: Slot; topic?: string }) {
   const { date, dateLabel } = moscowDateDetails(slot.start)
   return (
     <dl className="grid gap-x-4 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
       <dt className="text-muted-foreground">Тип встречи</dt>
       <dd>{meetingType.name}</dd>
+      {topic && (
+        <>
+          <dt className="text-muted-foreground">Тема</dt>
+          <dd className="wrap-anywhere">{topic}</dd>
+        </>
+      )}
       <dt className="text-muted-foreground">Дата</dt>
       <dd><time dateTime={date}>{dateLabel}</time></dd>
       <dt className="text-muted-foreground">Время по Москве ({calendarTimeZone})</dt>
@@ -41,6 +47,7 @@ function BookingDay({ meetingType, date, submitting, setSubmitting }: BookingSub
   const [revision, setRevision] = useState(0)
   const [slot, setSlot] = useState<Slot>()
   const [booking, setBooking] = useState<Booking>()
+  const [topic, setTopic] = useState('')
   const [guestName, setGuestName] = useState('')
   const [guestEmail, setGuestEmail] = useState('')
   const [message, setMessage] = useState('')
@@ -71,7 +78,7 @@ function BookingDay({ meetingType, date, submitting, setSubmitting }: BookingSub
     setMessage('')
     setFieldErrors({})
     try {
-      const submit = () => createBooking({ meetingTypeId, start: slot.start, guestName, guestEmail })
+      const submit = () => createBooking({ meetingTypeId, start: slot.start, topic, guestName, guestEmail })
       // Let the first response set the Guest profile cookie before another tab submits.
       const { status, data } = await (navigator.locks
         ? navigator.locks.request('calendar-guest-booking', submit)
@@ -101,7 +108,7 @@ function BookingDay({ meetingType, date, submitting, setSubmitting }: BookingSub
         <h2 id="booking-confirmed" className="text-xl font-semibold" tabIndex={-1} ref={(heading) => heading?.focus()}>
           Вы записаны
         </h2>
-        <BookingDetails meetingType={booking.meetingType} slot={booking} />
+        <BookingDetails meetingType={booking.meetingType} slot={booking} topic={booking.topic} />
         <a href="/bookings" className={buttonVariants({ className: 'w-fit' })}>Предстоящие записи</a>
       </section>
     )
@@ -125,6 +132,20 @@ function BookingDay({ meetingType, date, submitting, setSubmitting }: BookingSub
           <BookingDetails meetingType={meetingType} slot={slot} />
           {fieldErrors.start && <p>{fieldErrors.start}</p>}
           {fieldErrors.meetingTypeId && <p>{fieldErrors.meetingTypeId}</p>}
+          <label className="grid gap-1 text-sm font-medium">
+            Тема разговора
+            <input
+              className={inputClass}
+              value={topic}
+              onChange={(event) => setTopic(event.currentTarget.value)}
+              maxLength={100}
+              required
+              disabled={submitting}
+              aria-invalid={Boolean(fieldErrors.topic)}
+              aria-describedby={fieldErrors.topic ? 'booking-topic-error' : undefined}
+            />
+          </label>
+          {fieldErrors.topic && <p id="booking-topic-error" className="text-sm text-destructive">{fieldErrors.topic}</p>}
           <label className="grid gap-1 text-sm font-medium">
             Имя
             <input

@@ -10,8 +10,8 @@ const intro = {
   durationMinutes: 30,
 }
 const followUp = { ...intro, id: 'follow-up', name: 'Обсуждение', durationMinutes: 15 }
-const guest = { guestName: 'Анна', guestEmail: 'anna@example.com' }
-const otherGuest = { guestName: 'Иван', guestEmail: 'ivan@example.com' }
+const guest = { topic: 'Обсудить проект', guestName: 'Анна', guestEmail: 'anna@example.com' }
+const otherGuest = { topic: 'Обсудить найм', guestName: 'Иван', guestEmail: 'ivan@example.com' }
 
 let server
 let now
@@ -91,6 +91,7 @@ test('the Owner sees an empty state and then the details of upcoming bookings in
     const items = upcoming.getByRole('listitem')
     const first = items.nth(0)
     await first.getByText(intro.name, { exact: true }).waitFor()
+    await first.getByText(guest.topic, { exact: true }).waitFor()
     await first.getByText('20.11.2026', { exact: true }).waitFor()
     await first.getByText('11:00–11:30', { exact: true }).waitFor()
     await first.getByText('30 мин', { exact: true }).waitFor()
@@ -98,6 +99,7 @@ test('the Owner sees an empty state and then the details of upcoming bookings in
     await first.getByText(guest.guestEmail, { exact: true }).waitFor()
     const second = items.nth(1)
     await second.getByText(followUp.name, { exact: true }).waitFor()
+    await second.getByText(otherGuest.topic, { exact: true }).waitFor()
     await second.getByText('12:00–12:15', { exact: true }).waitFor()
     await second.getByText('15 мин', { exact: true }).waitFor()
     await second.getByText(otherGuest.guestName, { exact: true }).waitFor()

@@ -45,6 +45,7 @@ export function createCalendarApi(
     const meetingType = 'meetingTypeId' in fields && typeof fields.meetingTypeId === 'string'
       ? meetingTypes.get(fields.meetingTypeId) : undefined
     const start = bookingStart('start' in fields ? fields.start : undefined)
+    const topic = 'topic' in fields && typeof fields.topic === 'string' ? fields.topic.trim() : ''
     const guestName = 'guestName' in fields && typeof fields.guestName === 'string' ? fields.guestName.trim() : ''
     const guestEmail = 'guestEmail' in fields && typeof fields.guestEmail === 'string' ? fields.guestEmail.trim() : ''
     const validEmail = /^[^\s@]+@[^\s@.]+(?:\.[^\s@.]+)+$/.test(guestEmail)
@@ -53,10 +54,12 @@ export function createCalendarApi(
       ? workingSlots(date, meetingType.durationMinutes).find(({ start: candidate }) => candidate === start.toISOString())
       : undefined
 
-    if (!meetingType || !slot || !guestName || !validEmail) {
+    if (!meetingType || !slot || !topic || topic.length > 100 || !guestName || !validEmail) {
       const fieldErrors: CreateBooking400FieldErrors = {}
       if (!meetingType) fieldErrors.meetingTypeId = 'Выберите тип встречи.'
       if (!slot) fieldErrors.start = 'Выберите допустимое время встречи.'
+      if (!topic) fieldErrors.topic = 'Введите тему разговора.'
+      else if (topic.length > 100) fieldErrors.topic = 'Тема разговора не длиннее 100 символов.'
       if (!guestName) fieldErrors.guestName = 'Введите имя.'
       if (!validEmail) fieldErrors.guestEmail = 'Введите корректный email.'
       sendJson(response, 400, { message: 'Проверьте поля формы.', fieldErrors })
@@ -65,7 +68,7 @@ export function createCalendarApi(
 
     const existingKey = guestProfileKey(request)
     const profileKey = existingKey ?? newGuestProfileKey()
-    const booking = bookings.create({ ...slot, meetingType, guestName, guestEmail }, profileKey)
+    const booking = bookings.create({ ...slot, meetingType, topic, guestName, guestEmail }, profileKey)
     if (!booking) {
       sendJson(response, 409, { message: 'Это время уже занято. Выберите другое время' })
       return
@@ -107,8 +110,8 @@ export function createCalendarApi(
       const profileKey = guestProfileKey(request)
       const upcoming = profileKey ? bookings.listUpcoming(now(), profileKey) : []
       response.setHeader('Cache-Control', 'no-store')
-      sendJson(response, 200, upcoming.map(({ id, meetingType, start, end }) => ({
-        id, meetingType, start, end,
+      sendJson(response, 200, upcoming.map(({ id, meetingType, topic, start, end }) => ({
+        id, meetingType, topic, start, end,
       })))
       return true
     }

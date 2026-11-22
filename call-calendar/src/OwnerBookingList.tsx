@@ -16,11 +16,12 @@ function OwnerBookingList() {
         <>
           <p className="mt-2 text-sm text-muted-foreground">Время по Москве ({calendarTimeZone})</p>
           <ul className="mt-3 grid gap-3">
-            {bookings.map(({ id, meetingType, start, end, guestName, guestEmail }) => {
+            {bookings.map(({ id, meetingType, topic, start, end, guestName, guestEmail }) => {
               const { date, dateLabel } = moscowDateDetails(start)
               return (
                 <li key={id} className="grid gap-1 rounded-lg border p-4 text-sm">
                   <h3 className="text-base font-semibold">{meetingType.name}</h3>
+                  <p className="wrap-anywhere">{topic}</p>
                   <time dateTime={date}>{dateLabel}</time>
                   <p>{moscowTimeRange({ start, end })}</p>
                   <p>{meetingType.durationMinutes} мин</p>

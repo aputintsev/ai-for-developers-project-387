@@ -10,6 +10,7 @@ import type { Slot } from './slot.ts';
 export type Booking = Slot & {
   id: string;
   meetingType: MeetingType;
+  topic: string;
   guestName: string;
   guestEmail: string;
 };

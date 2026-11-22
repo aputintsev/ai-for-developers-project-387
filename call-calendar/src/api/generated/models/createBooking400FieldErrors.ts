@@ -8,6 +8,7 @@
 export type CreateBooking400FieldErrors = {
   meetingTypeId?: string;
   start?: string;
+  topic?: string;
   guestName?: string;
   guestEmail?: string;
 };

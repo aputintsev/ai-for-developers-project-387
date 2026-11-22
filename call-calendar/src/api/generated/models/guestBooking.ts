@@ -12,6 +12,7 @@ import type { MeetingType } from './meetingType.ts';
 export interface GuestBooking {
   id: string;
   meetingType: MeetingType;
+  topic: string;
   start: string;
   end: string;
 }
