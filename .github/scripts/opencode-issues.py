@@ -86,7 +86,8 @@ def paginate(endpoint):
 
 
 def bot_authored(item):
-    return item["user"]["login"] == "github-actions[bot]" and item["user"]["type"] == "Bot"
+    user = item.get("user") or {}
+    return user.get("login") == "github-actions[bot]" and user.get("type") == "Bot"
 
 
 def ensure_label(root):
@@ -207,6 +208,42 @@ def parent_specification(body):
     return int(references.pop()) if len(references) == 1 else None
 
 
+def discover_specification(root, source):
+    number = source["number"]
+    comments = {
+        str(comment["id"]): comment["body"]
+        for comment in paginate(f"{root}/issues/{number}/comments?per_page=100")
+        if bot_authored(comment) and comment.get("body")
+    }
+    issue_prefix = source["html_url"].rsplit("/", 1)[0]
+    candidates = set()
+    for body in comments.values():
+        if not body.startswith("## Published OpenCode issues\n"):
+            continue
+        summary = re.search(r"^<!-- opencode-published-summary:([1-9][0-9]*) -->$", body, re.MULTILINE)
+        draft_body = comments.get(summary[1], "") if summary else ""
+        if not draft_body.startswith("## OpenCode draft · to-spec\n"):
+            continue
+        draft = read_draft(draft_body)
+        if draft["source"] != number or draft["skill"] != "to-spec":
+            continue
+        published = re.findall(rf"^- {re.escape(issue_prefix)}/([1-9][0-9]*)$", body, re.MULTILINE)
+        if len(published) == 1:
+            candidates.add(int(published[0]))
+
+    open_specs = []
+    for candidate in sorted(candidates):
+        issue = gh(f"{root}/issues/{candidate}")
+        if issue["state"] == "open" and LABEL in {label["name"] for label in issue["labels"]}:
+            open_specs.append(candidate)
+    if len(open_specs) == 1:
+        return open_specs[0]
+    if open_specs:
+        choices = ", ".join(f"#{spec}" for spec in open_specs)
+        raise ValueError(f"Multiple open specifications for #{number}: {choices}. Use /oc skill implement-spec #SPEC")
+    raise ValueError(f"No open published specification for #{number}. Publish one or use /oc skill implement-spec #SPEC")
+
+
 def implementation_context(repo, event, spec_number, ticket_numbers):
     root = f"repos/{repo}"
     source = event["issue"]["number"]
@@ -223,6 +260,8 @@ def implementation_context(repo, event, spec_number, ticket_numbers):
         return issue
 
     original = open_issue(source)
+    if spec_number is None:
+        spec_number = discover_specification(root, original)
     spec = open_issue(spec_number)
     provenance = re.search(r"^<!-- opencode-published:([1-9][0-9]*):1 -->$", spec["body"] or "", re.MULTILINE)
     if not provenance or not bot_authored(spec):
@@ -246,6 +285,10 @@ def implementation_context(repo, event, spec_number, ticket_numbers):
         issue["number"]: issue
         for issue in paginate(f"{root}/issues/{spec_number}/sub_issues?per_page=100")
     })
+    if not ticket_numbers:
+        ticket_numbers = sorted(number for number, issue in linked.items() if issue["state"] == "open")
+        if not ticket_numbers:
+            raise ValueError(f"No open tickets for specification #{spec_number}")
     tickets = []
     for number in ticket_numbers:
         if number not in linked:
@@ -316,8 +359,8 @@ def main():
     implementation = commands.add_parser("implementation-context")
     implementation.add_argument("repo")
     implementation.add_argument("event", type=Path)
-    implementation.add_argument("spec", type=int)
-    implementation.add_argument("tickets", nargs="+", type=int)
+    implementation.add_argument("spec", nargs="?", type=int)
+    implementation.add_argument("tickets", nargs="*", type=int)
     pr_body = commands.add_parser("implementation-pr-body")
     for name in ("template", "links", "summary"):
         pr_body.add_argument(name, type=Path)

@@ -105,13 +105,22 @@ jobs:
               exit 0
             fi
             printf 'command=true\n' >> "$GITHUB_OUTPUT"
-            spec_pattern='^skill implement-spec( #[1-9][0-9]*){2,}$'
+            spec_pattern='^skill implement-spec( #[1-9][0-9]*)+$'
+            auto_spec_pattern='^skill implement-spec([[:space:]]+(-|—)[[:space:]]+.*|:[[:space:]]+.*)?$'
             if [[ $command == 'skill implement-spec'* ]]; then
-              if [[ $OWNER_ISSUE_COMMENT != true || ! $command =~ $spec_pattern ]]; then
-                printf '%s\n' 'Run /oc skill implement-spec #SPEC #TICKET [#TICKET ...] as the repository owner in the source issue.' >&2
+              if [[ $OWNER_ISSUE_COMMENT != true ]]; then
+                printf '%s\n' 'Run /oc skill implement-spec as the repository owner in the source issue.' >&2
                 exit 1
               fi
-              printf 'implement=true\nimplementation=%s\nallowed=true\n' "${command#skill implement-spec }" >> "$GITHUB_OUTPUT"
+              if [[ $command =~ $spec_pattern ]]; then
+                references="${command#skill implement-spec }"
+              elif [[ $command =~ $auto_spec_pattern ]]; then
+                references=''
+              else
+                printf '%s\n' 'Use /oc skill implement-spec or /oc skill implement-spec #SPEC [#TICKET ...].' >&2
+                exit 1
+              fi
+              printf 'implement=true\nimplement-spec=true\nimplementation=%s\nallowed=true\n' "$references" >> "$GITHUB_OUTPUT"
               exit 0
             fi
             if [[ $OWNER_ISSUE_COMMENT == true && $command == 'implement this issue'* ]]; then
@@ -202,7 +211,7 @@ jobs:
           ref: ${{ github.event_name == 'issue_comment' && github.sha || github.event.repository.default_branch }}
       - name: Read approved implementation scope
         id: implementation
-        if: steps.discussion.outputs.implementation != ''
+        if: steps.discussion.outputs.implement-spec == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}

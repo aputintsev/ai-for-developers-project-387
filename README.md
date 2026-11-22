@@ -137,10 +137,15 @@ When the repository owner posts a comment starting with `/oc implement this issu
 
 ### Implement an approved specification
 
-The repository owner posts `/oc skill implement-spec #SPEC #TICKET [#TICKET ...]`
-in the source issue. Use the published specification and its approved tickets.
-For the existing requests, use these commands after the workflow lands on the
-default branch.
+The repository owner posts `/oc skill implement-spec` in the source issue.
+The workflow finds the open specification in OpenCode's publication comments
+and loads its open tickets. You can add a description after ` - `, for example
+`/oc skill implement-spec - implement the specification and prepare a PR`.
+If multiple open specifications are published in the same discussion, use
+`/oc skill implement-spec #SPEC` to choose one. Add ticket numbers after the
+specification number to select a subset.
+
+Explicit commands for the existing requests:
 
 | Source issue | Command |
 | --- | --- |
