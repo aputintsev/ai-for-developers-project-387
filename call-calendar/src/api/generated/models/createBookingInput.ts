@@ -8,6 +8,11 @@
 export interface CreateBookingInput {
   meetingTypeId: string;
   start: string;
+  /**
+     * @minLength 1
+     * @maxLength 100
+     */
+  topic: string;
   /** @minLength 1 */
   guestName: string;
   guestEmail: string;

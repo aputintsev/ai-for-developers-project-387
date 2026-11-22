@@ -27,11 +27,12 @@ function GuestBookingList({ bookingPath }: { bookingPath: string }) {
     <div className="mt-6">
       <p className="text-sm text-muted-foreground">Время по Москве ({calendarTimeZone})</p>
       <ul className="mt-3 grid gap-3">
-        {bookings.map(({ id, meetingType, start, end }) => {
+        {bookings.map(({ id, meetingType, topic, start, end }) => {
           const { date, dateLabel } = moscowDateDetails(start)
           return (
             <li key={id} className="grid gap-1 rounded-lg border p-4 text-sm">
               <h2 className="text-base font-semibold">{meetingType.name}</h2>
+              <p className="wrap-anywhere">{topic}</p>
               <time dateTime={date}>{dateLabel}</time>
               <p>{moscowTimeRange({ start, end })}</p>
               <p>{meetingType.durationMinutes} мин</p>

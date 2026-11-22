@@ -91,6 +91,7 @@ op listSlots(@path meetingTypeId: string, @query date: plainDate):
 model CreateBookingInput {
   meetingTypeId: string;
   start: utcDateTime;
+  @minLength(1) @maxLength(100) topic: string;
   @minLength(1) guestName: string;
   @format("email") guestEmail: string;
 }
@@ -98,6 +99,7 @@ model CreateBookingInput {
 model Booking extends Slot {
   id: string;
   meetingType: MeetingType;
+  topic: string;
   guestName: string;
   guestEmail: string;
 }
@@ -116,6 +118,7 @@ model BookingValidationError {
     fieldErrors: {
       meetingTypeId?: string;
       start?: string;
+      topic?: string;
       guestName?: string;
       guestEmail?: string;
     };

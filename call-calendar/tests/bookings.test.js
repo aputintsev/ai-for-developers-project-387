@@ -12,7 +12,7 @@ const intro = {
 const followUp = { ...intro, id: 'follow-up', name: 'Обсуждение', durationMinutes: 15 }
 const now = new Date('2026-11-18T21:30:00Z')
 const start = '2026-11-20T07:00:00.000Z'
-const guest = { guestName: 'Анна', guestEmail: 'anna@example.com' }
+const guest = { topic: 'Обсудить проект', guestName: 'Анна', guestEmail: 'anna@example.com' }
 const conflictMessage = 'Это время уже занято. Выберите другое время'
 let server
 
@@ -106,6 +106,36 @@ test('the API reports invalid contact fields and rejects out-of-window and off-h
   }
 })
 
+test('the API validates the conversation topic and stores it trimmed', async () => {
+  const baseUrl = await startCalendar()
+  const input = { ...guest, meetingTypeId: intro.id, start }
+
+  for (const [topic, error] of [
+    ['', 'Введите тему разговора.'],
+    ['   ', 'Введите тему разговора.'],
+    ['я'.repeat(101), 'Тема разговора не длиннее 100 символов.'],
+  ]) {
+    const response = await book(baseUrl, { ...input, topic })
+    expect(response.status, topic).toBe(400)
+    expect(await response.json()).toEqual({
+      message: 'Проверьте поля формы.',
+      fieldErrors: { topic: error },
+    })
+  }
+
+  const combined = await book(baseUrl, { ...input, topic: '  ', guestEmail: 'anna' })
+  expect(combined.status).toBe(400)
+  expect(await combined.json()).toEqual({
+    message: 'Проверьте поля формы.',
+    fieldErrors: { topic: 'Введите тему разговора.', guestEmail: 'Введите корректный email.' },
+  })
+
+  const longest = 'я'.repeat(100)
+  const accepted = await book(baseUrl, { ...input, topic: `  ${longest}  ` })
+  expect(accepted.status).toBe(201)
+  expect(await accepted.json()).toMatchObject({ topic: longest })
+})
+
 test('a Guest keeps contact details after a slot conflict and confirms a new time', async () => {
   const baseUrl = await startCalendar()
   const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHROMIUM_CHANNEL })
@@ -123,13 +153,19 @@ test('a Guest keeps contact details after a slot conflict and confirms a new tim
     await form.getByText('20.11.2026', { exact: true }).waitFor()
     await form.getByText('10:00–10:30', { exact: true }).waitFor()
     await form.getByText('Время по Москве (Europe/Moscow)', { exact: true }).waitFor()
+    expect(await form.getByText('Тема', { exact: true }).count()).toBe(0)
 
     const confirm = form.getByRole('button', { name: 'Подтвердить запись' })
+    const conversationTopic = form.getByLabel('Тема разговора', { exact: true })
+    expect(await conversationTopic.getAttribute('maxlength')).toBe('100')
+    expect(await conversationTopic.getAttribute('required')).not.toBeNull()
     const name = form.getByLabel('Имя', { exact: true })
     const email = form.getByLabel('Email', { exact: true })
     await confirm.click()
+    await form.getByText('Введите тему разговора.', { exact: true }).waitFor()
     await form.getByText('Введите имя.', { exact: true }).waitFor()
     await form.getByText('Введите корректный email.', { exact: true }).waitFor()
+    await conversationTopic.fill(guest.topic)
     await name.fill(guest.guestName)
     await email.fill(guest.guestEmail)
 
@@ -162,15 +198,64 @@ test('a Guest keeps contact details after a slot conflict and confirms a new tim
     expect(await page.getByRole('button', { name: '10:00–10:30' }).count()).toBe(0)
 
     await nextSlot.click()
+    expect(await conversationTopic.inputValue()).toBe(guest.topic)
     expect(await name.inputValue()).toBe(guest.guestName)
     expect(await email.inputValue()).toBe(guest.guestEmail)
     await confirm.click()
     const confirmation = page.getByRole('region', { name: 'Вы записаны' })
     await confirmation.getByText(intro.name, { exact: true }).waitFor()
+    await confirmation.getByText(guest.topic, { exact: true }).waitFor()
     await confirmation.getByText('20.11.2026', { exact: true }).waitFor()
     await confirmation.getByText('10:30–11:00', { exact: true }).waitFor()
     expect(await confirmation.getByRole('link', { name: 'Предстоящие записи' }).getAttribute('href'))
       .toBe('/bookings')
+  } finally {
+    await browser.close()
+  }
+}, 15_000)
+
+test('a Guest keeps the draft details after a conflict and a date change', async () => {
+  const allDay = { ...intro, id: 'all-day', name: 'Весь день', durationMinutes: 480 }
+  const baseUrl = await startCalendar([allDay])
+  const browser = await chromium.launch({ channel: process.env.PLAYWRIGHT_CHROMIUM_CHANNEL })
+  try {
+    const page = await browser.newPage({ timezoneId: 'America/Los_Angeles' })
+    await page.clock.setFixedTime(now)
+    await page.goto(`${baseUrl}/book`)
+    await page.getByRole('button', { name: allDay.name, exact: true }).click()
+    await page.getByLabel('Дата встречи').fill('2026-11-20')
+    await page.getByRole('button', { name: '10:00–18:00' }).click()
+
+    const form = page.getByRole('form', { name: 'Подтверждение записи' })
+    const conversationTopic = form.getByLabel('Тема разговора', { exact: true })
+    const name = form.getByLabel('Имя', { exact: true })
+    const email = form.getByLabel('Email', { exact: true })
+    await conversationTopic.fill(guest.topic)
+    await name.fill(guest.guestName)
+    await email.fill(guest.guestEmail)
+
+    const competing = await book(baseUrl, { ...guest, meetingTypeId: allDay.id, start })
+    expect(competing.status).toBe(201)
+
+    await form.getByRole('button', { name: 'Подтвердить запись' }).click()
+    await page.getByText(conflictMessage, { exact: true }).waitFor()
+    await page.getByText('На эту дату нет свободных слотов.', { exact: true }).waitFor()
+
+    await page.getByLabel('Дата встречи').fill('2026-11-23')
+    await page.getByRole('button', { name: '10:00–18:00' }).waitFor()
+    expect(await form.count()).toBe(0)
+    await page.getByRole('button', { name: '10:00–18:00' }).click()
+    await form.waitFor()
+
+    expect(await conversationTopic.inputValue()).toBe(guest.topic)
+    expect(await name.inputValue()).toBe(guest.guestName)
+    expect(await email.inputValue()).toBe(guest.guestEmail)
+    await form.getByRole('button', { name: 'Подтвердить запись' }).click()
+
+    const confirmation = page.getByRole('region', { name: 'Вы записаны' })
+    await confirmation.getByText(guest.topic, { exact: true }).waitFor()
+    await confirmation.getByText('23.11.2026', { exact: true }).waitFor()
+    await confirmation.getByText('10:00–18:00', { exact: true }).waitFor()
   } finally {
     await browser.close()
   }
@@ -188,6 +273,7 @@ test('a slot conflict brings the message into view after another Guest books the
       await page.getByRole('button', { name: intro.name, exact: true }).click()
       await page.getByLabel('Дата встречи').fill('2026-11-20')
       await page.getByRole('button', { name: '10:00–10:30' }).click()
+      await page.getByLabel('Тема разговора', { exact: true }).fill(guest.topic)
       await page.getByLabel('Имя', { exact: true }).fill(guest.guestName)
       await page.getByLabel('Email', { exact: true }).fill(guest.guestEmail)
     }
@@ -221,6 +307,7 @@ test('two fresh tabs keep both bookings in the same Guest profile', async () => 
       await page.getByRole('button', { name: intro.name, exact: true }).click()
       await page.getByLabel('Дата встречи').fill('2026-11-20')
       await page.getByRole('button', { name: index === 0 ? '10:00–10:30' : '10:30–11:00' }).click()
+      await page.getByLabel('Тема разговора', { exact: true }).fill(guest.topic)
       await page.getByLabel('Имя', { exact: true }).fill(guest.guestName)
       await page.getByLabel('Email', { exact: true }).fill(guest.guestEmail)
     }))

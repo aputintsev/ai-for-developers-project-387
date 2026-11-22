@@ -9,7 +9,7 @@ const intro = {
   description: 'Обсудим ваши цели',
   durationMinutes: 30,
 }
-const guest = { guestName: 'Анна', guestEmail: 'anna@example.com' }
+const guest = { topic: 'Обсудить проект', guestName: 'Анна', guestEmail: 'anna@example.com' }
 const initialNow = '2026-11-18T21:30:00Z'
 let now
 let server
@@ -61,11 +61,29 @@ test('lists only strictly future bookings in the current Guest profile, ordered 
 
   now = new Date('2026-11-20T07:00:00.000Z')
   expect(await guestBookings(baseUrl, cookie)).toEqual([
-    { id: earlier.id, meetingType: intro, start: '2026-11-20T08:00:00.000Z', end: '2026-11-20T08:30:00.000Z' },
-    { id: later.id, meetingType: intro, start: '2026-11-20T09:00:00.000Z', end: '2026-11-20T09:30:00.000Z' },
+    {
+      id: earlier.id,
+      meetingType: intro,
+      topic: guest.topic,
+      start: '2026-11-20T08:00:00.000Z',
+      end: '2026-11-20T08:30:00.000Z',
+    },
+    {
+      id: later.id,
+      meetingType: intro,
+      topic: guest.topic,
+      start: '2026-11-20T09:00:00.000Z',
+      end: '2026-11-20T09:30:00.000Z',
+    },
   ])
   expect(await guestBookings(baseUrl, otherCookie)).toEqual([
-    { id: otherBooking.id, meetingType: intro, start: '2026-11-20T10:00:00.000Z', end: '2026-11-20T10:30:00.000Z' },
+    {
+      id: otherBooking.id,
+      meetingType: intro,
+      topic: guest.topic,
+      start: '2026-11-20T10:00:00.000Z',
+      end: '2026-11-20T10:30:00.000Z',
+    },
   ])
   expect(await guestBookings(baseUrl)).toEqual([])
 })
@@ -89,6 +107,7 @@ test('a Guest sees booking details in Moscow time and can book from the empty li
     await page.getByRole('link', { name: 'Предстоящие записи', exact: true }).click()
     const booking = page.getByRole('listitem').filter({ hasText: intro.name })
     await booking.getByText(intro.name, { exact: true }).waitFor()
+    await booking.getByText(guest.topic, { exact: true }).waitFor()
     await booking.getByText('20.11.2026', { exact: true }).waitFor()
     await booking.getByText('10:00–10:30', { exact: true }).waitFor()
     await booking.getByText('30 мин', { exact: true }).waitFor()
