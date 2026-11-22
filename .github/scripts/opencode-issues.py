@@ -194,6 +194,110 @@ def publish(repo, thread, comment_id):
     print(summary)
 
 
+def parent_specification(body):
+    # Older ticket drafts named the specification in Parent and linked the
+    # ticket to the source issue on GitHub.
+    parent = re.search(r"^## Parent[ \t]*\n(.*?)(?=^## |\Z)", body or "", re.MULTILINE | re.DOTALL)
+    if parent is None:
+        return None
+    references = set(re.findall(
+        r"(?:\bspec(?:ification)?|\bспецификация|\bспека)\s*:\s*#([1-9][0-9]*)\b",
+        parent[1], re.IGNORECASE
+    ))
+    return int(references.pop()) if len(references) == 1 else None
+
+
+def implementation_context(repo, event, spec_number, ticket_numbers):
+    root = f"repos/{repo}"
+    source = event["issue"]["number"]
+    numbers = [source, spec_number, *ticket_numbers]
+    if len(set(numbers)) != len(numbers):
+        raise ValueError("Source, specification, and tickets must be distinct issues")
+
+    def open_issue(number):
+        issue = gh(f"{root}/issues/{number}")
+        if "pull_request" in issue or issue["state"] != "open":
+            raise ValueError(f"#{number} must be an open issue")
+        if number != source and LABEL not in {label["name"] for label in issue["labels"]}:
+            raise ValueError(f"#{number} must have the {LABEL} label")
+        return issue
+
+    original = open_issue(source)
+    spec = open_issue(spec_number)
+    provenance = re.search(r"^<!-- opencode-published:([1-9][0-9]*):1 -->$", spec["body"] or "", re.MULTILINE)
+    if not provenance or not bot_authored(spec):
+        raise ValueError(f"#{spec_number} must be a specification published from #{source}")
+    draft_comment = gh(f"{root}/issues/comments/{provenance[1]}")
+    if not bot_authored(draft_comment) or draft_comment["issue_url"] != original["url"]:
+        raise ValueError(f"#{spec_number} must be a specification published from #{source}")
+    draft = read_draft(draft_comment["body"])
+    if draft["skill"] != "to-spec" or draft["source"] != source:
+        raise ValueError(f"#{spec_number} must be a specification published from #{source}")
+
+    def issue_context(issue):
+        return {key: issue[key] for key in ("number", "title", "body", "html_url")}
+
+    linked = {
+        issue["number"]: issue
+        for issue in paginate(f"{root}/issues/{source}/sub_issues?per_page=100")
+        if parent_specification(issue["body"]) == spec_number
+    }
+    linked.update({
+        issue["number"]: issue
+        for issue in paginate(f"{root}/issues/{spec_number}/sub_issues?per_page=100")
+    })
+    tickets = []
+    for number in ticket_numbers:
+        if number not in linked:
+            raise ValueError(f"#{number} must belong to specification #{spec_number}")
+        ticket = issue_context(open_issue(number))
+        blockers = [
+            item["number"]
+            for item in paginate(f"{root}/issues/{number}/dependencies/blocked_by?per_page=100")
+            if item["state"] == "open"
+        ]
+        if set(blockers) - set(ticket_numbers):
+            raise ValueError(f"Include the unresolved blockers of #{number} in the command")
+        ticket["blocked_by"] = blockers
+        tickets.append(ticket)
+    return {
+        "source": issue_context(original),
+        "specification": issue_context(spec),
+        "close_specification": all(
+            issue["state"] == "closed" or number in ticket_numbers
+            for number, issue in linked.items()
+        ),
+        "tickets": tickets,
+        "owner_approval": event["comment"]["html_url"],
+    }
+
+
+def implementation_pr_body(template, links, summary, sha, run_url):
+    sections = re.split(r"^## (Change|Checks|Risk|Rollback)[ \t]*\r?$", summary,
+                        flags=re.MULTILINE | re.IGNORECASE)
+    content = {name.capitalize(): text for name, text in zip(sections[1::2], sections[2::2])}
+    change = content.get("Change", sections[0]).strip() or "Implements the linked specification and tickets."
+    risk = content.get("Risk", "").strip() or (
+        "Users of the changed flow could encounter a regression. Review the affected behavior "
+        "against the specification and the acceptance tests in the linked run."
+    )
+    rollback = content.get("Rollback", "").strip()
+    rollback_steps = (
+        "Revert the commit that introduced this change on the base branch "
+        "(use `git revert -m 1 <merge-sha>` for a merge commit). "
+        "Run `mise run check` and verify the previous behavior for the affected flow."
+    )
+    values = {
+        "Change": f"{links.strip()}\n\n{change}",
+        "Checks": f"`mise run check` passed for `{sha}`. [Actions run]({run_url}).",
+        "Risk": risk,
+        "Rollback": "\n\n".join(filter(None, (rollback, rollback_steps))),
+    }
+    return re.sub(r"^## (Change|Checks|Risk|Rollback)$",
+                  lambda match: f"{match[0]}\n\n{values[match[1]]}",
+                  template, flags=re.MULTILINE)
+
+
 def main():
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -209,6 +313,16 @@ def main():
     apply.add_argument("repo")
     apply.add_argument("thread", type=int)
     apply.add_argument("comment_id", type=int)
+    implementation = commands.add_parser("implementation-context")
+    implementation.add_argument("repo")
+    implementation.add_argument("event", type=Path)
+    implementation.add_argument("spec", type=int)
+    implementation.add_argument("tickets", nargs="+", type=int)
+    pr_body = commands.add_parser("implementation-pr-body")
+    for name in ("template", "links", "summary"):
+        pr_body.add_argument(name, type=Path)
+    pr_body.add_argument("sha")
+    pr_body.add_argument("run_url")
     args = parser.parse_args()
     if args.command == "draft":
         raw = args.output.read_text().strip()
@@ -237,6 +351,18 @@ def main():
         comment_id = pending_draft(json.loads(args.comments.read_text()), args.approval)
         if comment_id is not None:
             print(comment_id)
+    elif args.command == "implementation-context":
+        try:
+            print(json.dumps(implementation_context(
+                args.repo, json.loads(args.event.read_text()), args.spec, args.tickets
+            ), ensure_ascii=False))
+        except ValueError as error:
+            parser.exit(1, f"{error}\n")
+    elif args.command == "implementation-pr-body":
+        print(implementation_pr_body(
+            args.template.read_text(), args.links.read_text(), args.summary.read_text(),
+            args.sha, args.run_url
+        ), end="")
     else:
         publish(args.repo, args.thread, args.comment_id)
 

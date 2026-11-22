@@ -131,9 +131,36 @@ Only comments from human users are considered: bots are ignored, the author must
 
 ### What the agent can do
 
-The default `plan` run can read with `read`, `glob`, and `grep`, and may load the `to-spec`, `to-tickets`, and `implement-spec` skills from `.agents/skills/`. It cannot edit files or run commands. Its answer is posted in the original thread: an issue or PR conversation comment becomes a new issue comment, and an inline review comment becomes a reply in that review thread.
+The default `plan` run can read with `read`, `glob`, and `grep`, and may load the `to-spec` and `to-tickets` skills from `.agents/skills/`. It cannot edit files or run commands. Its answer is posted in the original thread: an issue or PR conversation comment becomes a new issue comment, and an inline review comment becomes a reply in that review thread.
 
 When the repository owner posts a comment starting with `/oc implement this issue` on an issue (not a pull request), the workflow switches to the `build` agent and allows file edits, except `.git/**`, `.github/workflows/**`, and `opencode.json`. The edited tree is exported as a patch limited to 90 KB. A separate `publish-implementation` job then commits it as `github-actions[bot]` to a fresh `opencode/issue-<number>-<run>-<attempt>` branch, opens a draft PR against the default branch, and comments the commit, PR, and Actions links on the issue. The agent never commits, pushes, or opens the PR itself.
+
+### Implement an approved specification
+
+The repository owner posts `/oc skill implement-spec #SPEC #TICKET [#TICKET ...]`
+in the source issue. Use the published specification and its approved tickets.
+For the existing requests, use these commands after the workflow lands on the
+default branch.
+
+| Source issue | Command |
+| --- | --- |
+| #14 | `/oc skill implement-spec #21 #23 #24 #25` |
+| #27 | `/oc skill implement-spec #29 #31 #32` |
+
+The workflow verifies that OpenCode published the specification from the source
+issue. It checks the `ready-for-agent` labels, ticket links and dependencies,
+then invokes `@implement-spec` in OpenCode's `build` agent. For new tickets,
+use `/oc skill to-tickets #SPEC` to attach them to the published specification.
+Existing tickets attached to the source issue can identify the specification in
+their `Parent` section.
+
+The agent processes the selected tickets in dependency order and updates
+acceptance tests when the approved criteria call for it. A separate job runs
+`mise run check`, including API generation. After verification, the workflow
+opens a draft PR using the repository template and links to the source issue
+and the owner's command. Merging the PR closes the selected tickets and closes
+the specification when the PR covers all of its open tickets. If verification
+fails, the workflow posts the reason and Actions log link in the source issue.
 
 ### PR command limit
 

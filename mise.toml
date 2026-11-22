@@ -23,7 +23,7 @@ shellcheck = "0.11.0"
 run = ["npm --prefix call-calendar ci", "mise run install:browser", "hk install"]
 
 [tasks.check]
-run = ["mise run generate:api", "hk check --all", "mise run build", "mise run smoke", "mise run vulnerabilities"]
+run = ["mise run generate:api", "python -B -m unittest discover -s .github/scripts", "hk check --all", "mise run build", "mise run smoke", "mise run vulnerabilities"]
 
 [tasks.lint]
 run = "npm --prefix call-calendar run lint -- --max-warnings 0"
