@@ -11,6 +11,8 @@ import subprocess
 DRAFT_PREFIX = "<!-- opencode-issue-draft "
 LABEL = "ready-for-agent"
 MAX_DRAFT_BYTES = 60_000
+LEGACY_REVIEW_NOTE = "Review the specification and confirm the proposed testing boundaries in Testing Decisions before publishing."
+REVIEW_NOTE = "Review Testing Decisions. Reply in this discussion to approve the draft for publication or request changes."
 
 
 def validate(draft):
@@ -34,7 +36,7 @@ def validate(draft):
             raise ValueError(f"Item {index} must reference distinct earlier blockers")
 
 
-def render(draft):
+def render(draft, *, review_note=REVIEW_NOTE):
     validate(draft)
     lines = [f"## OpenCode draft · {draft['skill']}", "", f"Source issue #{draft['source']}"]
     for index, item in enumerate(draft["items"], start=1):
@@ -42,7 +44,7 @@ def render(draft):
         lines.extend(["", f"### {index}. {item['title']}", "", f"Blocked by draft items: {blockers}", "", item["body"]])
     encoded = base64.b64encode(json.dumps(draft, ensure_ascii=False, separators=(",", ":")).encode()).decode()
     if draft.get("review_testing") is True:
-        lines.extend(["", "Review Testing Decisions. Reply in this discussion to approve the draft for publication or request changes."])
+        lines.extend(["", review_note])
     lines.extend(["", "After review, the owner can publish this exact draft with `/oc skill publish <comment ID>`.",
                   "", f"{DRAFT_PREFIX}{encoded} -->"])
     result = "\n".join(lines) + "\n"
@@ -89,9 +91,11 @@ def read_draft(body):
     if not match:
         raise ValueError("No OpenCode draft found in the approved comment")
     draft = json.loads(base64.b64decode(match[1], validate=True))
-    if render(draft).rstrip("\n") != body:
-        raise ValueError("Draft data differs from the displayed proposal")
-    return draft
+    if render(draft).rstrip("\n") == body:
+        return draft
+    if draft.get("review_testing") is True and render(draft, review_note=LEGACY_REVIEW_NOTE).rstrip("\n") == body:
+        return draft
+    raise ValueError("Draft data differs from the displayed proposal")
 
 
 def pending_spec(comments, approval):
