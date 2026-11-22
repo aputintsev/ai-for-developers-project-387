@@ -102,12 +102,19 @@ process.stdout.write(JSON.stringify(parse(readFileSync(process.argv[1], 'utf8'))
                 self.assertEqual(out.get("pr-head"), self.pr["head"]["sha"])
                 self.assertEqual(out.get("pr-branch"), "pr-head")
 
-    def test_refuses_unapproved_or_unscoped_edits(self):
+    def test_refuses_unapproved_or_unscoped_edits_before_admission(self):
+        steps = {step.get("id"): step for step in self.jobs["analyze"]["steps"]}
+        for step_id in ("budget", "install"):
+            self.assertIn("steps.discussion.outputs.allowed == 'true'", steps[step_id]["if"])
+        self.assertEqual(steps["admission"]["if"], "steps.budget.outputs.available == 'true'")
+        self.assertEqual(steps["opencode"]["if"], "steps.install.outcome == 'success'")
+
         for body, owner in (("/oc apply Fix the test", False), ("/oc apply", True),
                             ("Example /OC Apply Fix the test", True)):
             with self.subTest(body=body, owner=owner):
                 out = self.read_discussion(body, owner=owner)
                 self.assertIn("reply", out)
+                self.assertNotIn("allowed", out)
                 self.assertNotIn("implement", out)
                 self.assertNotIn("pr-head", out)
 

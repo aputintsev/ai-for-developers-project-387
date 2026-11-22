@@ -149,6 +149,14 @@ After `mise run check` passes, a separate job commits and pushes to the same
 head branch and posts the commit and run in the PR conversation. If the PR
 head moves during the run, review the new revision before approving again.
 
+The bot push uses `GITHUB_TOKEN`, so it does not trigger the `push` run of
+Quality. To publish the Quality check for the new head, run **Quality → Run
+workflow** for the PR branch or use
+`gh workflow run quality.yml --ref <pr-branch>`. GitHub puts the PR
+`synchronize` workflows, including OpenCode PR Review, in an approval-required
+state. A maintainer with write access can select **Approve workflows to run**
+in the PR. [GitHub workflow trigger rules](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow#triggering-a-workflow-from-a-workflow)
+
 ### Implement an approved specification
 
 The repository owner posts `/oc skill implement-spec` in the source issue.
@@ -189,7 +197,9 @@ and inline review threads. The workflow queues commands for the same PR and
 checks GitHub Actions history with `actions: read` before installing OpenCode
 or passing it the model key. A successful **Record admitted PR request** step
 spends one attempt. It counts even if the run later fails, times out, or is
-cancelled. A re-run that reaches this step spends another attempt.
+cancelled. Rejected `/oc apply` commands stop before admission and leave the
+budget available. A re-run that reaches the admission step spends another
+attempt.
 
 Once the budget is spent, the reply job posts `limit_exhausted` in the
 request's thread with the current PR head SHA, an Actions log link, and a
