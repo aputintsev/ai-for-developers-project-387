@@ -147,13 +147,16 @@ default branch.
 | #14 | `/oc skill implement-spec #21 #23 #24 #25` |
 | #27 | `/oc skill implement-spec #29 #31 #32` |
 
-The workflow reads open issues with the `ready-for-agent` label, checks ticket
-links and dependencies, then invokes `@implement-spec` in OpenCode's
+The workflow verifies that OpenCode published the specification from the source
+issue. It checks the `ready-for-agent` labels, ticket links and dependencies,
+then invokes `@implement-spec` in OpenCode's
 `build` agent. It uses one working tree and processes tickets in dependency
 order. A separate job checks the acceptance-test changes, regenerates API
 artifacts and runs `mise run check`. After the checks pass, the publish job
-opens one draft PR with the source, specification, closing references, link to
-the owner's command, checks, risk and rollback.
+opens one draft PR using the repository template. The description includes the
+source, specification, closing references, link to the owner's command, checks,
+risk and rollback. If verification fails, a separate job posts the reason and
+the Actions log link in the source issue.
 
 ### PR command limit
 
