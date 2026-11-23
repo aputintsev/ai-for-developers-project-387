@@ -106,6 +106,15 @@ Render MCP позволяет проверять состояние сервис
 
 [Документация Render MCP](https://render.com/docs/mcp-server)
 
+## Мои выводы о работе GitHub-агента
+
+На проекте «Календарь звонков» я использовал OpenCode для разбора обращений, подготовки спецификаций и тикетов, реализации и ревью. Больше всего уточнений потребовали две вещи: какое именно поведение я ожидаю от приложения и какое действие разрешаю агенту в каждом запуске.
+Нюансы поведения приложения - это вполне ожидаемое уточнение, поскольку задача ставится высокоуровнево, без подробностей, и агенту попросту не хватает деталей для перехода к реализации.
+
+А вот настройки полномочий агента преподнесли куда больше сюрпризов. Сначала агент мог написать спецификацию прямо в комментарии, а затем попросить переключить его из режима планирования, а как переключить было непонятно. Иногда workflow отклонял слишком длинный ответ или некорректный JSON. Я настроил публикацию отдельным шагом после одобрения владельца. Для спецификаций перешел на Markdown, для тикетов сохранил JSON и добавил попытку исправить ответ при ошибке формата. Одобрение можно написать своими словами.
+
+Мой главный вывод: агент хорошо помогает там, где можно явно задать границы задачи и проверить результат. Для реализации важно описать, что пользователь должен увидеть и что должно произойти при ошибке. Для автоматизации таким же критерием стало наблюдаемое действие: какой черновик опубликован, какой коммит проверен и появился ли дубликат при повторном запуске.
+
 ---
 
 <details>
@@ -244,6 +253,29 @@ one issue at a time.
 
 See the [triage comment on issue #27](https://github.com/aputintsev/ai-for-developers-project-387/issues/27#issuecomment-7080215278)
 and its [Actions run](https://github.com/aputintsev/ai-for-developers-project-387/actions/runs/45030331803).
+
+### Scheduled Lighthouse audit
+
+The [Lighthouse audit workflow](.github/workflows/lighthouse-audit.yml) checks
+the deployed Call Calendar every day at 06:17 Europe/Moscow. The `APP_URL`
+repository variable sets the URL. To run it manually, select **Actions →
+Lighthouse audit → Run workflow** and choose `main`. Scheduled and manual audits share a
+concurrency group so only one audit runs at a time.
+
+Each run keeps the HTML and JSON reports for 14 days in the `lighthouse-report`
+artifact under **Artifacts**. OpenCode compares report findings with open and
+closed issues and records its conclusion under **Summary → OpenCode Lighthouse
+analysis**. A separate publishing job checks for duplicates again and creates
+an issue only for a new finding. The issue records the evidence, the proposed
+action, and a link back to the run.
+
+- The first manual run on `main` saved the report and opened an issue about
+  missing cache lifetimes for hashed static assets. Lighthouse estimated savings
+  of 136 KiB on repeat visits. [First run](https://github.com/aputintsev/ai-for-developers-project-387/actions/runs/45086601346),
+  [issue #41](https://github.com/aputintsev/ai-for-developers-project-387/issues/41).
+- The repeat run saved a fresh report and completed its analysis. GitHub Actions
+  skipped the `publish` job and no duplicate issue was created.
+  [Repeat run](https://github.com/aputintsev/ai-for-developers-project-387/actions/runs/45086837239).
 
 ### Independent pull request review
 
