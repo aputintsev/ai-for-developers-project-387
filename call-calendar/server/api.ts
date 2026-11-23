@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { CreateBooking400FieldErrors } from '../src/api/generated/models/createBooking400FieldErrors.ts'
 import type { CreateMeetingType400FieldErrors } from '../src/api/generated/models/createMeetingType400FieldErrors.ts'
 import type { MeetingType } from '../src/api/generated/models/meetingType.ts'
-import { calendarTimeZone, moscowDate } from '../src/lib/calendar-time.ts'
+import { bookingWindowMessage, calendarTimeZone, moscowDate } from '../src/lib/calendar-time.ts'
 import { isBookableDate, workingSlots } from './availability.ts'
 import { createBookingStore } from './bookings.ts'
 import { guestProfileCookie, guestProfileKey, newGuestProfileKey } from './guest-profile.ts'
@@ -134,7 +134,7 @@ export function createCalendarApi(
       if (!meetingType) {
         sendJson(response, 404, { message: 'Тип встречи не найден.' })
       } else if (!isBookableDate(date, now())) {
-        sendJson(response, 400, { message: 'Выберите дату в пределах 14 дней с завтрашнего дня по Москве.' })
+        sendJson(response, 400, { message: bookingWindowMessage() })
       } else {
         sendJson(response, 200, {
           timeZone: calendarTimeZone,

@@ -1,5 +1,7 @@
 export const calendarTimeZone = 'Europe/Moscow'
 
+export const bookingWindowDays = 21
+
 const moscowDateFormatter = new Intl.DateTimeFormat('en-CA', {
   timeZone: calendarTimeZone,
   year: 'numeric',
@@ -21,12 +23,23 @@ export function bookingWindow(now: Date) {
   const firstDay = new Date(`${moscowDate(now)}T00:00:00Z`)
   firstDay.setUTCDate(firstDay.getUTCDate() + 1)
   const lastDay = new Date(firstDay)
-  lastDay.setUTCDate(lastDay.getUTCDate() + 13)
+  lastDay.setUTCDate(lastDay.getUTCDate() + bookingWindowDays - 1)
 
   return {
     first: firstDay.toISOString().slice(0, 10),
     last: lastDay.toISOString().slice(0, 10),
   }
+}
+
+const pluralRules = new Intl.PluralRules('ru')
+
+function bookingWindowDayWord(days: number) {
+  const form = pluralRules.select(days)
+  return form === 'one' || form === 'few' ? 'дня' : 'дней'
+}
+
+export function bookingWindowMessage() {
+  return `Выберите дату в пределах ${bookingWindowDays} ${bookingWindowDayWord(bookingWindowDays)} с завтрашнего дня по Москве.`
 }
 
 function moscowTime(instant: string) {

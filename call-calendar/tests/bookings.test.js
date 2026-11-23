@@ -91,7 +91,7 @@ test('the API reports invalid contact fields and rejects out-of-window and off-h
   for (const invalidStart of [
     'invalid',
     '2026-11-19T07:00:00.000Z',
-    '2026-12-04T07:00:00.000Z',
+    '2026-12-11T07:00:00.000Z',
     '2026-11-21T07:00:00.000Z',
     '2026-11-20T06:45:00.000Z',
     '2026-11-20T07:01:00.000Z',
@@ -104,6 +104,17 @@ test('the API reports invalid contact fields and rejects out-of-window and off-h
       fieldErrors: { start: 'Выберите допустимое время встречи.' },
     })
   }
+})
+
+test('the API accepts a booking in the third week of the booking window', async () => {
+  const baseUrl = await startCalendar()
+  const thirdWeekStart = '2026-12-04T07:00:00.000Z'
+  const response = await book(baseUrl, { ...guest, meetingTypeId: intro.id, start: thirdWeekStart })
+  expect(response.status).toBe(201)
+  expect(await response.json()).toMatchObject({
+    start: thirdWeekStart,
+    end: '2026-12-04T07:30:00.000Z',
+  })
 })
 
 test('the API validates the conversation topic and stores it trimmed', async () => {
