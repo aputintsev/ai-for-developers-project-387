@@ -39,7 +39,7 @@ function bookingWindowDayWord(days: number) {
 }
 
 export function bookingWindowMessage() {
-  return `Выберите дату в пределах ${bookingWindowDays} ${bookingWindowDayWord(bookingWindowDays)} с завтрашнего дня по Москве.`
+  return `Можно выбрать дату в пределах ${bookingWindowDays} ${bookingWindowDayWord(bookingWindowDays)} с завтрашнего дня по Москве.`
 }
 
 function moscowTime(instant: string) {

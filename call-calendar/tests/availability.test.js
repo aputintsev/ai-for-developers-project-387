@@ -57,7 +57,7 @@ test('the API applies both booking-window boundaries by the Moscow calendar', as
     const response = await getSlots(date)
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
-      message: 'Выберите дату в пределах 21 дня с завтрашнего дня по Москве.',
+      message: 'Можно выбрать дату в пределах 21 дня с завтрашнего дня по Москве.',
     })
   }
 })
