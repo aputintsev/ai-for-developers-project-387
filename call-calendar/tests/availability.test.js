@@ -46,18 +46,18 @@ test('the API applies both booking-window boundaries by the Moscow calendar', as
   const baseUrl = await startCalendar()
   const getSlots = (date) => fetch(`${baseUrl}/api/meeting-types/intro/slots?date=${date}`)
 
-  const lastDay = await getSlots('2026-12-03')
+  const lastDay = await getSlots('2026-12-10')
   expect(lastDay.status).toBe(200)
   expect((await lastDay.json()).slots[0]).toEqual({
-    start: '2026-12-03T07:00:00.000Z',
-    end: '2026-12-03T07:30:00.000Z',
+    start: '2026-12-10T07:00:00.000Z',
+    end: '2026-12-10T07:30:00.000Z',
   })
 
-  for (const date of ['2026-11-19', '2026-12-04', '2026-11-31', '']) {
+  for (const date of ['2026-11-19', '2026-12-11', '2026-11-31', '']) {
     const response = await getSlots(date)
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
-      message: 'Выберите дату в пределах 14 дней с завтрашнего дня по Москве.',
+      message: 'Можно выбрать дату в пределах 21 дня с завтрашнего дня по Москве.',
     })
   }
 })
@@ -87,11 +87,22 @@ test('a Guest selects a date and sees slots in Moscow time', async () => {
     await page.getByRole('button', { name: 'Знакомство', exact: true }).click({ timeout: 3_000 })
     const date = page.getByLabel('Дата встречи')
     expect(await date.getAttribute('min')).toBe('2026-11-20')
-    expect(await date.getAttribute('max')).toBe('2026-12-03')
+    expect(await date.getAttribute('max')).toBe('2026-12-10')
     await date.fill('2026-11-20')
     await page.getByText('Время по Москве (Europe/Moscow)', { exact: true }).waitFor()
     await page.getByText('10:00–10:30', { exact: true }).waitFor()
     await page.getByText('17:30–18:00', { exact: true }).waitFor()
+
+    const thirdWeekSlots = page.waitForResponse(
+      (response) => response.status() === 200 && response.url().endsWith('/slots?date=2026-12-08'),
+    )
+    await date.fill('2026-12-08')
+    const thirdWeekResponse = await thirdWeekSlots
+    expect((await thirdWeekResponse.json()).slots[0]).toEqual({
+      start: '2026-12-08T07:00:00.000Z',
+      end: '2026-12-08T07:30:00.000Z',
+    })
+    await page.getByText('10:00–10:30', { exact: true }).waitFor()
 
     await date.fill('2026-11-21')
     await page.getByText('На эту дату нет свободных слотов.').waitFor()

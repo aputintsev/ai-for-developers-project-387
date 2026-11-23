@@ -5,7 +5,7 @@
 - Compare the diff with the source issue, agreed specification, tickets, and human approval linked in the PR. Flag missing evidence and behavior outside the agreed scope.
 - Check existing guest and owner flows around the change, including loading, empty, and failure states where relevant.
 - For booking changes, verify that a confirmed slot and overlapping intervals are no longer offered. A stale or concurrent booking request must receive a conflict response without creating a second booking.
-- For availability changes, check the owner's time zone, the 14-day booking window starting tomorrow, and the meeting type duration. Check date boundaries when time conversion changes.
+- For availability changes, check the owner's time zone, the 21-day booking window starting tomorrow, and the meeting type duration. Check date boundaries when time conversion changes.
 - For guest booking changes, check that one guest cannot see another guest's bookings and that guest responses exclude names and email addresses.
 - For API changes, compare the TypeSpec contract, server behavior, and generated client. Check that validation errors and conflicts reach the UI.
 
